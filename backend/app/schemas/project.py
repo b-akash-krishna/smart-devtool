@@ -19,3 +19,9 @@ class ProjectResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ScrapeStatusResponse(ProjectResponse):
+    raw_content: str | None = None
+    
+    model_config = {"from_attributes": True}
