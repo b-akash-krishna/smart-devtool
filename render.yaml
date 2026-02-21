@@ -21,6 +21,7 @@ services:
     name: smart-devtool-redis
     plan: free
     maxmemoryPolicy: noeviction
+    ipAllowList: []
 
 databases:
   - name: smart-devtool-db
