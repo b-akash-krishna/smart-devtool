@@ -64,3 +64,15 @@ export const generateSDK = async (id: string, language: string): Promise<Blob> =
   );
   return response.data;
 };
+
+export const listProjects = async (): Promise<Project[]> => {
+  const { data } = await api.get("/api/v1/projects");
+  return data;
+};
+
+export const exportOpenAPI = async (id: string, format: "json" | "yaml"): Promise<Blob> => {
+  const response = await api.get(`/api/v1/projects/${id}/export?format=${format}`, {
+    responseType: "blob"
+  });
+  return response.data;
+};

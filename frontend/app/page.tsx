@@ -1,8 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Download, Zap, Globe, Code2 } from "lucide-react";
-import { createProject, getProject, getEndpoints, generateSDK, Project, EndpointsResponse } from "@/lib/api";
+import { Download, Zap, Globe, Code2, History, FileJson, Terminal } from "lucide-react";
+import {
+  createProject, getProject, getEndpoints, generateSDK,
+  listProjects, exportOpenAPI,
+  Project, EndpointsResponse
+} from "@/lib/api";
 import StatusBadge from "@/components/StatusBadge";
 import EndpointCard from "@/components/EndpointCard";
 
@@ -15,10 +19,30 @@ export default function Home() {
   const [language, setLanguage] = useState<"python" | "typescript">("python");
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
+  const [history, setHistory] = useState<Project[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   const stopPolling = () => {
     if (pollRef.current) clearInterval(pollRef.current);
+  };
+
+  const startLogs = (projectId: string) => {
+    if (eventSourceRef.current) eventSourceRef.current.close();
+    setLogs([]);
+    setShowLogs(true);
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const es = new EventSource(`${apiUrl}/api/v1/projects/${projectId}/logs`);
+    es.onmessage = (e) => {
+      if (e.data === "ping") return;
+      if (e.data === "DONE" || e.data === "FAILED") { es.close(); return; }
+      setLogs(prev => [...prev, e.data]);
+    };
+    eventSourceRef.current = es;
   };
 
   const startPolling = (projectId: string) => {
@@ -31,17 +55,33 @@ export default function Home() {
           stopPolling();
           const eps = await getEndpoints(projectId);
           setEndpoints(eps);
+          loadHistory();
         } else if (updated.status === "FAILED") {
           stopPolling();
           setError("Processing failed. Please try again.");
         }
-      } catch {
-        stopPolling();
-      }
+      } catch { stopPolling(); }
     }, 2000);
   };
 
-  useEffect(() => () => stopPolling(), []);
+  const loadHistory = async () => {
+    try {
+      const projects = await listProjects();
+      setHistory(projects);
+    } catch {}
+  };
+
+  useEffect(() => {
+    loadHistory();
+    return () => {
+      stopPolling();
+      eventSourceRef.current?.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
 
   const handleSubmit = async () => {
     if (!url || !name) return;
@@ -53,6 +93,7 @@ export default function Home() {
       const p = await createProject(name, url);
       setProject(p);
       startPolling(p.id);
+      startLogs(p.id);
     } catch {
       setError("Failed to create project. Is the backend running?");
     } finally {
@@ -71,10 +112,29 @@ export default function Home() {
       a.download = `${project.api_name || "sdk"}_${language}_sdk.zip`;
       a.click();
       URL.revokeObjectURL(downloadUrl);
-    } catch {
-      setError("Failed to generate SDK.");
-    } finally {
-      setGenerating(false);
+    } catch { setError("Failed to generate SDK."); }
+    finally { setGenerating(false); }
+  };
+
+  const handleExport = async (format: "json" | "yaml") => {
+    if (!project) return;
+    try {
+      const blob = await exportOpenAPI(project.id, format);
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download = `openapi.${format}`;
+      a.click();
+      URL.revokeObjectURL(downloadUrl);
+    } catch { setError("Failed to export OpenAPI spec."); }
+  };
+
+  const handleHistoryClick = async (p: Project) => {
+    setProject(p);
+    setShowHistory(false);
+    if (p.status === "COMPLETED") {
+      const eps = await getEndpoints(p.id);
+      setEndpoints(eps);
     }
   };
 
@@ -83,15 +143,50 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
       {/* Header */}
-      <header className="border-b border-white/10 px-6 py-4 flex items-center gap-3">
-        <div className="bg-blue-500 p-1.5 rounded-lg">
-          <Zap className="w-5 h-5" />
+      <header className="border-b border-white/10 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="bg-blue-500 p-1.5 rounded-lg">
+            <Zap className="w-5 h-5" />
+          </div>
+          <h1 className="text-xl font-bold">Smart DevTool</h1>
+          <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full">beta</span>
         </div>
-        <h1 className="text-xl font-bold">Smart DevTool</h1>
-        <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full ml-1">beta</span>
+        <button
+          onClick={() => { setShowHistory(!showHistory); loadHistory(); }}
+          className="flex items-center gap-2 text-slate-400 hover:text-white transition text-sm"
+        >
+          <History className="w-4 h-4" />
+          History ({history.length})
+        </button>
       </header>
 
       <div className="max-w-4xl mx-auto px-6 py-12">
+        {/* History Panel */}
+        {showHistory && (
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-8">
+            <h3 className="font-semibold mb-3 text-slate-300">Recent Projects</h3>
+            {history.length === 0 ? (
+              <p className="text-slate-500 text-sm">No projects yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {history.map(p => (
+                  <div
+                    key={p.id}
+                    onClick={() => handleHistoryClick(p)}
+                    className="flex items-center justify-between p-3 rounded-lg bg-white/5 hover:bg-white/10 cursor-pointer transition"
+                  >
+                    <div>
+                      <p className="text-sm font-medium">{p.api_name || p.name}</p>
+                      <p className="text-xs text-slate-500 font-mono">{p.base_url}</p>
+                    </div>
+                    <StatusBadge status={p.status} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Hero */}
         <div className="text-center mb-12">
           <h2 className="text-4xl font-bold mb-4">
@@ -143,10 +238,27 @@ export default function Home() {
           {error && <p className="text-red-400 text-sm mt-3">{error}</p>}
         </div>
 
+        {/* Live Logs Terminal */}
+        {showLogs && logs.length > 0 && (
+          <div className="bg-black/60 border border-white/10 rounded-xl p-4 mb-6 font-mono text-sm">
+            <div className="flex items-center gap-2 mb-3 text-slate-400">
+              <Terminal className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wider">Live Processing Logs</span>
+            </div>
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {logs.map((log, i) => (
+                <div key={i} className="text-green-400">
+                  <span className="text-slate-600 mr-2">$</span>{log}
+                </div>
+              ))}
+              <div ref={logsEndRef} />
+            </div>
+          </div>
+        )}
+
         {/* Status & Results */}
         {project && (
           <div className="space-y-6">
-            {/* Project Status */}
             <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -163,7 +275,6 @@ export default function Home() {
               )}
             </div>
 
-            {/* Auth Info */}
             {project.auth_scheme && project.auth_scheme.type !== "none" && (
               <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 flex items-start gap-3">
                 <span className="text-yellow-400 mt-0.5">🔐</span>
@@ -176,15 +287,29 @@ export default function Home() {
               </div>
             )}
 
-            {/* Endpoints */}
             {endpoints && endpoints.endpoints.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-semibold text-slate-200">
                     {endpoints.endpoint_count} Endpoints Discovered
                   </h3>
-                  {/* Download Controls */}
                   <div className="flex items-center gap-2">
+                    {/* OpenAPI Export */}
+                    <button
+                      onClick={() => handleExport("json")}
+                      className="flex items-center gap-1.5 text-xs bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 px-3 py-1.5 rounded-lg transition"
+                    >
+                      <FileJson className="w-3.5 h-3.5" />
+                      JSON
+                    </button>
+                    <button
+                      onClick={() => handleExport("yaml")}
+                      className="flex items-center gap-1.5 text-xs bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 px-3 py-1.5 rounded-lg transition"
+                    >
+                      <FileJson className="w-3.5 h-3.5" />
+                      YAML
+                    </button>
+                    {/* SDK Download */}
                     <select
                       value={language}
                       onChange={e => setLanguage(e.target.value as "python" | "typescript")}
