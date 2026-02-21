@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: smart-devtool-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smart-devtool-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: smart-devtool-redis
+          type: redis
+          property: connectionString
+
+  - type: redis
+    name: smart-devtool-redis
+    plan: free
+    maxmemoryPolicy: noeviction
+
+databases:
+  - name: smart-devtool-db
+    plan: free
