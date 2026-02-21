@@ -11,6 +11,10 @@ from app.schemas.project import ProjectCreate, ProjectResponse, ScrapeStatusResp
 from app.services.scraper import scrape_docs
 from app.services.llm_parser import parse_documentation
 
+import io
+from fastapi.responses import StreamingResponse
+from app.services.codegen import generate_sdk
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -79,7 +83,10 @@ async def create_project(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    project = Project(name=payload.name, base_url=str(payload.url))
+    from urllib.parse import urlparse
+    parsed = urlparse(str(payload.url))
+    api_base_url = f"{parsed.scheme}://{parsed.netloc}"
+    project = Project(name=payload.name, base_url=api_base_url)
     db.add(project)
     await db.commit()
     await db.refresh(project)
@@ -129,3 +136,60 @@ async def get_endpoints(project_id: str, db: AsyncSession = Depends(get_db)):
             for ep in endpoints
         ],
     }
+
+import json
+from fastapi.responses import StreamingResponse
+import io
+from app.services.codegen import generate_sdk
+
+
+@router.post("/{project_id}/generate")
+async def generate_code(
+    project_id: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    language = payload.get("language", "python")
+    if language not in ["python", "typescript"]:
+        raise HTTPException(status_code=400, detail="Language must be 'python' or 'typescript'")
+
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.status != ProjectStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail=f"Project is not ready (status: {project.status})")
+
+    ep_result = await db.execute(
+        select(APIEndpoint).where(APIEndpoint.project_id == project_id)
+    )
+    endpoints = ep_result.scalars().all()
+
+    schema = {
+        "api_name": project.api_name or "MyAPI",
+        "version": "1.0.0",
+        "base_url": project.base_url,
+        "auth_scheme": project.auth_scheme,
+        "endpoints": [
+            {
+                "method": ep.method,
+                "path": ep.path,
+                "summary": ep.summary or "",
+                "description": ep.description or "",
+                "parameters": ep.parameters or [],
+                "request_body": ep.request_body or {},
+                "response_schema": ep.response_schema or {},
+                "tags": ep.tags or [],
+            }
+            for ep in endpoints
+        ],
+    }
+
+    zip_bytes = generate_sdk(schema, language)
+    filename = f"{project.api_name or 'sdk'}_{language}_sdk.zip".replace(" ", "_").lower()
+
+    return StreamingResponse(
+        io.BytesIO(zip_bytes),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
