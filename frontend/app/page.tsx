@@ -330,7 +330,7 @@ export default function Home() {
                 </div>
                 <div className="space-y-3">
                   {endpoints.endpoints.map(ep => (
-                    <EndpointCard key={ep.id} endpoint={ep} />
+                    <EndpointCard key={ep.id} endpoint={ep} baseUrl={project.base_url} />
                   ))}
                 </div>
               </div>

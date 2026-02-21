@@ -1,4 +1,5 @@
 import { Endpoint } from "@/lib/api";
+import TryItPlayground from "./TryItPlayground";
 
 const METHOD_COLORS: Record<string, string> = {
   GET:    "bg-green-100 text-green-700 border-green-200",
@@ -8,7 +9,12 @@ const METHOD_COLORS: Record<string, string> = {
   PATCH:  "bg-purple-100 text-purple-700 border-purple-200",
 };
 
-export default function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
+interface Props {
+  endpoint: Endpoint;
+  baseUrl: string;
+}
+
+export default function EndpointCard({ endpoint, baseUrl }: Props) {
   return (
     <div className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow bg-white">
       <div className="flex items-center gap-3 mb-2">
@@ -23,7 +29,7 @@ export default function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
         ))}
       </div>
       {endpoint.summary && (
-        <p className="text-sm text-gray-600 mb-3">{endpoint.summary}</p>
+        <p className="text-sm text-gray-600 mb-2">{endpoint.summary}</p>
       )}
       {endpoint.parameters?.length > 0 && (
         <div className="mt-2">
@@ -35,17 +41,14 @@ export default function EndpointCard({ endpoint }: { endpoint: Endpoint }) {
                 <span className="text-gray-400">{param.type}</span>
                 <span className="text-gray-400">·</span>
                 <span className="text-gray-400">{param.location}</span>
-                {param.required && (
-                  <span className="text-red-500 font-medium">required</span>
-                )}
-                {param.description && (
-                  <span className="text-gray-500">— {param.description}</span>
-                )}
+                {param.required && <span className="text-red-500 font-medium">required</span>}
+                {param.description && <span className="text-gray-500">— {param.description}</span>}
               </div>
             ))}
           </div>
         </div>
       )}
+      <TryItPlayground endpoint={endpoint} baseUrl={baseUrl} />
     </div>
   );
 }
