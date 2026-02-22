@@ -48,6 +48,13 @@ class APISchema(BaseModel):
     auth: AuthScheme = Field(default_factory=lambda: AuthScheme(type="none"))
     endpoints: list[Endpoint] = []
 
+class IntegrationSuggestion(BaseModel):
+    approach: str = Field(description="REST or SDK")
+    language: str = ""
+    reasoning: str = ""
+    recommended_libraries: list[str] = []
+    code_snippet: str = ""
+
 
 SYSTEM_PROMPT = """You are an expert API documentation parser.
 Your job is to extract structured API information from raw documentation text.
@@ -55,6 +62,8 @@ You MUST respond with valid JSON only — no markdown, no explanation, no code f
 The JSON must conform exactly to the schema provided."""
 
 EXTRACTION_PROMPT = """Extract all API endpoints and authentication information from the documentation below.
+
+{use_case_context}
 
 Return a JSON object with this exact structure:
 {{
@@ -176,7 +185,7 @@ def _parse_openapi_spec(spec: dict, base_url: str) -> APISchema:
         endpoints=endpoints,
     )
 
-async def parse_documentation(markdown_content: str, base_url: str = "") -> APISchema:
+async def parse_documentation(markdown_content: str, base_url: str = "", use_case: str = "") -> APISchema:
     """
     Parse API documentation. Fast path for OpenAPI specs, LLM fallback for raw HTML docs.
     """
@@ -209,9 +218,18 @@ async def parse_documentation(markdown_content: str, base_url: str = "") -> APIS
         if i > 0:
             await asyncio.sleep(5)
         try:
+            use_case_context = (
+                f"The developer wants to use this API for: {use_case}\n"
+                f"Focus on extracting endpoints most relevant to this use case."
+                if use_case else ""
+            )
+
             messages = [
                 SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content=EXTRACTION_PROMPT.format(content=chunk)),
+                HumanMessage(content=EXTRACTION_PROMPT.format(
+                    content=chunk,
+                    use_case_context=use_case_context
+                )),
             ]
             response = await llm.ainvoke(messages)
             raw = response.content.strip()
@@ -237,3 +255,61 @@ async def parse_documentation(markdown_content: str, base_url: str = "") -> APIS
 
     logger.info(f"Parsing complete: {len(merged.endpoints)} endpoints extracted")
     return merged
+
+async def suggest_integration_paths(
+    api_schema: APISchema, use_case: str
+) -> list[dict]:
+    """Generate integration path suggestions based on API schema and use case."""
+    
+    suggestions = []
+    auth_type = api_schema.auth.type
+    endpoint_count = len(api_schema.endpoints)
+
+    # Rule-based suggestions (fast, no LLM needed)
+    
+    # Python SDK suggestion
+    python_libs = ["httpx", "requests"]
+    if auth_type == "bearer":
+        python_libs.append("python-jose (for JWT)")
+    elif auth_type == "oauth2":
+        python_libs.extend(["requests-oauthlib", "authlib"])
+
+    suggestions.append({
+        "approach": "Generated Python SDK",
+        "language": "Python",
+        "reasoning": f"Best for data pipelines, scripting, and ML workflows. "
+                     f"The auto-generated client handles {auth_type} auth automatically.",
+        "recommended_libraries": python_libs,
+        "code_snippet": f"client = {api_schema.api_name.replace(' ', '')}Client()\n"
+                       f"result = client.{api_schema.endpoints[0].method.lower()}_{api_schema.endpoints[0].path.replace('/', '_').strip('_')}()"
+                       if api_schema.endpoints else "",
+        "is_recommended": True,
+    })
+
+    # TypeScript SDK suggestion
+    ts_libs = ["fetch API (built-in)", "axios"]
+    suggestions.append({
+        "approach": "Generated TypeScript SDK",
+        "language": "TypeScript",
+        "reasoning": "Best for Node.js backends and React/Next.js frontends. "
+                     "Fully typed client prevents runtime errors.",
+        "recommended_libraries": ts_libs,
+        "code_snippet": f"const client = new {api_schema.api_name.replace(' ', '')}Client();\n"
+                       f"const result = await client.get{api_schema.endpoints[0].path.replace('/', '').title()}();"
+                       if api_schema.endpoints else "",
+        "is_recommended": False,
+    })
+
+    # Raw REST suggestion
+    suggestions.append({
+        "approach": "Direct REST calls",
+        "language": "Any",
+        "reasoning": "Maximum flexibility. Use when you only need 1-2 endpoints "
+                     "or want full control over the HTTP layer.",
+        "recommended_libraries": ["curl", "httpx", "fetch"],
+        "code_snippet": f"curl -X GET '{api_schema.base_url}{api_schema.endpoints[0].path}'"
+                       if api_schema.endpoints else "",
+        "is_recommended": False,
+    })
+
+    return suggestions

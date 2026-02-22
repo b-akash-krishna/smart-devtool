@@ -41,8 +41,10 @@ export interface EndpointsResponse {
   endpoints: Endpoint[];
 }
 
-export const createProject = async (name: string, url: string): Promise<Project> => {
-  const { data } = await api.post("/api/v1/projects", { name, url });
+export const createProject = async (
+  name: string, url: string, use_case: string = ""
+): Promise<Project> => {
+  const { data } = await api.post("/api/v1/projects", { name, url, use_case });
   return data;
 };
 
@@ -75,4 +77,9 @@ export const exportOpenAPI = async (id: string, format: "json" | "yaml"): Promis
     responseType: "blob"
   });
   return response.data;
+};
+
+export const getSuggestions = async (id: string): Promise<any> => {
+  const { data } = await api.get(`/api/v1/projects/${id}/suggestions`);
+  return data;
 };

@@ -7,6 +7,7 @@ from app.models.project import ProjectStatus
 class ProjectCreate(BaseModel):
     name: str
     url: HttpUrl
+    use_case: str = ""
 
 
 class ProjectResponse(BaseModel):
@@ -23,4 +24,6 @@ class ScrapeStatusResponse(ProjectResponse):
     api_name: str | None = None
     api_description: str | None = None
     auth_scheme: dict | None = None
+    use_case: str | None = None
     model_config = {"from_attributes": True}
+    integration_suggestions: list | None = None

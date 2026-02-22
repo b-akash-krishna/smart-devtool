@@ -19,11 +19,13 @@ from fastapi.responses import JSONResponse, StreamingResponse, Response
 
 from app.core.log_store import append_log
 
+from app.services.llm_parser import parse_documentation, suggest_integration_paths
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
-async def run_scrape_and_parse_job(project_id: UUID, url: str):
+async def run_scrape_and_parse_job(project_id: UUID, url: str, use_case: str = ""):
     from app.core.database import AsyncSessionLocal
     from app.core.log_store import append_log
 
@@ -32,33 +34,40 @@ async def run_scrape_and_parse_job(project_id: UUID, url: str):
             result = await db.execute(select(Project).where(Project.id == project_id))
             project = result.scalar_one()
 
-            # Stage 1: Scrape
             append_log(str(project_id), "🔍 Starting documentation scrape...")
             project.status = ProjectStatus.SCRAPING
             await db.commit()
 
             scrape_results = await scrape_docs(url, max_pages=5)
             append_log(str(project_id), f"✅ Scraped {len(scrape_results)} page(s) successfully")
-            
+
             combined_markdown = "\n\n---\n\n".join(
                 [f"# Source: {r.url}\n\n{r.markdown}" for r in scrape_results]
             )
             project.raw_content = combined_markdown[:50000]
             await db.commit()
 
-            # Stage 2: Parse
             append_log(str(project_id), "🧠 Analyzing documentation with AI...")
             project.status = ProjectStatus.PARSING
             await db.commit()
 
-            api_schema = await parse_documentation(combined_markdown, base_url=url)
+            # Pass use_case to parser
+            api_schema = await parse_documentation(
+                combined_markdown, base_url=url, use_case=use_case
+            )
             append_log(str(project_id), f"📋 Discovered {len(api_schema.endpoints)} endpoint(s)")
 
-            # Stage 3: Store
+            # Generate integration suggestions
+            append_log(str(project_id), "💡 Generating integration path suggestions...")
+            suggestions = await suggest_integration_paths(api_schema, use_case)
+            project.integration_suggestions = suggestions
+            await db.commit()
+
             append_log(str(project_id), "💾 Saving results to database...")
             project.api_name = api_schema.api_name
             project.api_description = api_schema.description
             project.auth_scheme = api_schema.auth.model_dump()
+            project.use_case = use_case
 
             for ep in api_schema.endpoints:
                 endpoint = APIEndpoint(
@@ -76,7 +85,7 @@ async def run_scrape_and_parse_job(project_id: UUID, url: str):
 
             project.status = ProjectStatus.COMPLETED
             await db.commit()
-            append_log(str(project_id), f"🎉 Done! SDK ready for download.")
+            append_log(str(project_id), "🎉 Done! SDK ready for download.")
             append_log(str(project_id), "DONE")
 
         except Exception as e:
@@ -99,11 +108,18 @@ async def create_project(
     from urllib.parse import urlparse
     parsed = urlparse(str(payload.url))
     api_base_url = f"{parsed.scheme}://{parsed.netloc}"
-    project = Project(name=payload.name, base_url=api_base_url)
+    
+    project = Project(
+        name=payload.name,
+        base_url=api_base_url,
+        use_case=payload.use_case
+    )
     db.add(project)
     await db.commit()
     await db.refresh(project)
-    background_tasks.add_task(run_scrape_and_parse_job, project.id, str(payload.url))
+    background_tasks.add_task(
+        run_scrape_and_parse_job, project.id, str(payload.url), payload.use_case
+    )
     return project
 
 
@@ -293,3 +309,15 @@ async def stream_logs(project_id: str):
             "X-Accel-Buffering": "no",
         }
     )
+
+@router.get("/{project_id}/suggestions")
+async def get_suggestions(project_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {
+        "project_id": project_id,
+        "use_case": project.use_case,
+        "suggestions": project.integration_suggestions or []
+    }

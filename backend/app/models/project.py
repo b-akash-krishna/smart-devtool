@@ -32,6 +32,9 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    use_case: Mapped[str | None] = mapped_column(Text, nullable=True)
+    integration_suggestions: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     endpoints: Mapped[list["APIEndpoint"]] = relationship("APIEndpoint", back_populates="project", cascade="all, delete-orphan")
 
 

@@ -4,11 +4,14 @@ import { useState, useEffect, useRef } from "react";
 import { Download, Zap, Globe, Code2, History, FileJson, Terminal } from "lucide-react";
 import {
   createProject, getProject, getEndpoints, generateSDK,
-  listProjects, exportOpenAPI,
+  listProjects, exportOpenAPI, getSuggestions,
   Project, EndpointsResponse
 } from "@/lib/api";
 import StatusBadge from "@/components/StatusBadge";
 import EndpointCard from "@/components/EndpointCard";
+
+
+import IntegrationSuggestions from "@/components/IntegrationSuggestions";
 
 export default function Home() {
   const [url, setUrl] = useState("");
@@ -26,6 +29,8 @@ export default function Home() {
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const [useCase, setUseCase] = useState("");
+  const [suggestions, setSuggestions] = useState<any[]>([]);
 
   const stopPolling = () => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -55,6 +60,8 @@ export default function Home() {
           stopPolling();
           const eps = await getEndpoints(projectId);
           setEndpoints(eps);
+          const sugg = await getSuggestions(projectId);
+          setSuggestions(sugg.suggestions || []);
           loadHistory();
         } else if (updated.status === "FAILED") {
           stopPolling();
@@ -90,7 +97,7 @@ export default function Home() {
     setEndpoints(null);
     setLoading(true);
     try {
-      const p = await createProject(name, url);
+      const p = await createProject(name, url, useCase);
       setProject(p);
       startPolling(p.id);
       startLogs(p.id);
@@ -225,6 +232,18 @@ export default function Home() {
                   />
                 </div>
               </div>
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">
+                  Use Case <span className="text-slate-600">(optional but recommended)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Build a cat facts Telegram bot in Python"
+                  value={useCase}
+                  onChange={e => setUseCase(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
             </div>
             <button
               onClick={handleSubmit}
@@ -285,6 +304,10 @@ export default function Home() {
                   </p>
                 </div>
               </div>
+            )}
+
+            {suggestions.length > 0 && (
+              <IntegrationSuggestions suggestions={suggestions} />
             )}
 
             {endpoints && endpoints.endpoints.length > 0 && (
