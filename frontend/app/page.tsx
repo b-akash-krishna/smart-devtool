@@ -95,6 +95,9 @@ export default function Home() {
     setError("");
     setProject(null);
     setEndpoints(null);
+    setSuggestions([]);
+    setLogs([]);
+    setShowLogs(false);
     setLoading(true);
     try {
       const p = await createProject(name, url, useCase);

@@ -261,55 +261,92 @@ async def suggest_integration_paths(
 ) -> list[dict]:
     """Generate integration path suggestions based on API schema and use case."""
     
-    suggestions = []
+    # Detect preferred language from use case
+    use_case_lower = use_case.lower()
+    preferred_language = None
+    if any(word in use_case_lower for word in ["python", "django", "flask", "fastapi"]):
+        preferred_language = "python"
+    elif any(word in use_case_lower for word in ["javascript", "typescript", "node", "react", "next", "js", "ts"]):
+        preferred_language = "typescript"
+    elif any(word in use_case_lower for word in ["go", "golang"]):
+        preferred_language = "go"
+    elif any(word in use_case_lower for word in ["java", "spring"]):
+        preferred_language = "java"
+
     auth_type = api_schema.auth.type
-    endpoint_count = len(api_schema.endpoints)
+    first_ep = api_schema.endpoints[0] if api_schema.endpoints else None
 
-    # Rule-based suggestions (fast, no LLM needed)
-    
-    # Python SDK suggestion
-    python_libs = ["httpx", "requests"]
-    if auth_type == "bearer":
-        python_libs.append("python-jose (for JWT)")
-    elif auth_type == "oauth2":
-        python_libs.extend(["requests-oauthlib", "authlib"])
+    # Build suggestions based on detected language
+    suggestions = []
 
-    suggestions.append({
-        "approach": "Generated Python SDK",
-        "language": "Python",
-        "reasoning": f"Best for data pipelines, scripting, and ML workflows. "
-                     f"The auto-generated client handles {auth_type} auth automatically.",
-        "recommended_libraries": python_libs,
-        "code_snippet": f"client = {api_schema.api_name.replace(' ', '')}Client()\n"
-                       f"result = client.{api_schema.endpoints[0].method.lower()}_{api_schema.endpoints[0].path.replace('/', '_').strip('_')}()"
-                       if api_schema.endpoints else "",
-        "is_recommended": True,
-    })
+    # Primary SDK suggestion — matches detected language
+    if preferred_language == "python" or not preferred_language:
+        python_libs = ["httpx", "requests"]
+        if auth_type == "bearer":
+            python_libs.append("python-jose")
+        elif auth_type == "oauth2":
+            python_libs.extend(["requests-oauthlib", "authlib"])
 
-    # TypeScript SDK suggestion
-    ts_libs = ["fetch API (built-in)", "axios"]
-    suggestions.append({
-        "approach": "Generated TypeScript SDK",
-        "language": "TypeScript",
-        "reasoning": "Best for Node.js backends and React/Next.js frontends. "
-                     "Fully typed client prevents runtime errors.",
-        "recommended_libraries": ts_libs,
-        "code_snippet": f"const client = new {api_schema.api_name.replace(' ', '')}Client();\n"
-                       f"const result = await client.get{api_schema.endpoints[0].path.replace('/', '').title()}();"
-                       if api_schema.endpoints else "",
-        "is_recommended": False,
-    })
+        suggestions.append({
+            "approach": "Generated Python SDK",
+            "language": "Python",
+            "reasoning": (
+                f"Matches your use case: '{use_case}'. "
+                f"Best for scripting, bots, and data pipelines. "
+                f"The auto-generated client handles {auth_type} auth automatically."
+            ) if use_case else f"Best for scripting and data pipelines.",
+            "recommended_libraries": python_libs,
+            "code_snippet": (
+                f"from {api_schema.api_name.replace(' ', '').lower()}_client import {api_schema.api_name.replace(' ', '')}Client\n\n"
+                f"client = {api_schema.api_name.replace(' ', '')}Client()\n"
+                f"result = client.get_{first_ep.path.strip('/').replace('/', '_')}()\n"
+                f"print(result)"
+            ) if first_ep else "",
+            "is_recommended": preferred_language == "python" or not preferred_language,
+        })
 
-    # Raw REST suggestion
+    if preferred_language == "typescript" or preferred_language == "javascript" or not preferred_language:
+        ts_libs = ["fetch API (built-in)", "axios"]
+        suggestions.append({
+            "approach": f"Generated {'TypeScript' if 'typescript' in use_case_lower else 'JavaScript'} SDK",
+            "language": "TypeScript" if "typescript" in use_case_lower else "JavaScript",
+            "reasoning": (
+                f"Matches your use case: '{use_case}'. "
+                f"Perfect for Node.js bots, Express backends, and React frontends. "
+                f"Fully typed client prevents runtime errors."
+            ) if use_case else "Best for Node.js and frontend applications.",
+            "recommended_libraries": ts_libs,
+            "code_snippet": (
+                f"import {{ {api_schema.api_name.replace(' ', '')}Client }} from './{api_schema.api_name.replace(' ', '').lower()}_client';\n\n"
+                f"const client = new {api_schema.api_name.replace(' ', '')}Client();\n"
+                f"const result = await client.get{first_ep.path.strip('/').title()}();\n"
+                f"console.log(result);"
+            ) if first_ep else "",
+            "is_recommended": preferred_language in ["typescript", "javascript"],
+        })
+
+    # Always add REST as fallback
     suggestions.append({
         "approach": "Direct REST calls",
         "language": "Any",
-        "reasoning": "Maximum flexibility. Use when you only need 1-2 endpoints "
-                     "or want full control over the HTTP layer.",
+        "reasoning": "Maximum flexibility. Use when you only need 1-2 endpoints or want full control over the HTTP layer.",
         "recommended_libraries": ["curl", "httpx", "fetch"],
-        "code_snippet": f"curl -X GET '{api_schema.base_url}{api_schema.endpoints[0].path}'"
-                       if api_schema.endpoints else "",
+        "code_snippet": f"curl -X GET '{api_schema.base_url}{first_ep.path}'" if first_ep else "",
         "is_recommended": False,
     })
+
+    # If a non-Python/JS language detected, add a note
+    if preferred_language in ["go", "java"]:
+        suggestions.insert(0, {
+            "approach": f"{preferred_language.title()} Integration",
+            "language": preferred_language.title(),
+            "reasoning": f"Detected {preferred_language.title()} preference from your use case. Use the OpenAPI export to generate a {preferred_language.title()} client with your preferred generator.",
+            "recommended_libraries": (
+                ["go-resty", "net/http"] if preferred_language == "go"
+                else ["OkHttp", "Retrofit", "Spring WebClient"]
+            ),
+            "code_snippet": "# Export OpenAPI spec and use your preferred code generator",
+            "is_recommended": True,
+        })
 
     return suggestions
