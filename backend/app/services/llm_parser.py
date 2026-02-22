@@ -136,17 +136,32 @@ def _merge_schemas(schemas: list[APISchema]) -> APISchema:
     return merged
 
 def _parse_openapi_spec(spec: dict, base_url: str) -> APISchema:
-    """Parse a raw OpenAPI 3.x or Swagger 2.x spec directly — no LLM needed."""
     info = spec.get("info", {})
     
-    # Detect auth
+    # Handle both OpenAPI 3.x and Swagger 2.x base URLs
+    if not base_url:
+        if "servers" in spec:  # OpenAPI 3.x
+            base_url = spec["servers"][0].get("url", "")
+        elif "host" in spec:  # Swagger 2.x
+            scheme = spec.get("schemes", ["https"])[0]
+            base_url = f"{scheme}://{spec['host']}{spec.get('basePath', '')}"
+
+    # Auth detection — handle both formats
     auth = AuthScheme(type="none")
+    
+    # OpenAPI 3.x
     security_schemes = spec.get("components", {}).get("securitySchemes", {})
+    # Swagger 2.x
+    if not security_schemes:
+        security_schemes = spec.get("securityDefinitions", {})
+    
     for scheme_name, scheme in security_schemes.items():
         if scheme.get("type") == "http" and scheme.get("scheme") == "bearer":
             auth = AuthScheme(type="bearer", header_name="Authorization", description=f"Bearer token via {scheme_name}")
         elif scheme.get("type") == "apiKey":
             auth = AuthScheme(type="api_key", header_name=scheme.get("name", "X-API-Key"), description=f"API Key via {scheme_name}")
+        elif scheme.get("type") == "oauth2":
+            auth = AuthScheme(type="oauth2", header_name="Authorization", description=f"OAuth2 via {scheme_name}")
 
     endpoints = []
     for path, path_item in spec.get("paths", {}).items():
@@ -160,7 +175,7 @@ def _parse_openapi_spec(spec: dict, base_url: str) -> APISchema:
                 parameters.append(Parameter(
                     name=p.get("name", ""),
                     location=p.get("in", "query"),
-                    type=schema.get("type", "string"),
+                    type=schema.get("type", p.get("type", "string")),
                     required=p.get("required", False),
                     description=p.get("description", ""),
                 ))
@@ -171,7 +186,7 @@ def _parse_openapi_spec(spec: dict, base_url: str) -> APISchema:
                 summary=operation.get("summary", ""),
                 description=operation.get("description", ""),
                 parameters=parameters,
-                request_body=operation.get("requestBody", {}),
+                request_body=operation.get("requestBody", operation.get("body", {})),
                 response_schema=operation.get("responses", {}),
                 tags=operation.get("tags", []),
             ))
@@ -192,7 +207,7 @@ async def parse_documentation(markdown_content: str, base_url: str = "", use_cas
     import re
 
     # Fast path: detect raw OpenAPI/Swagger JSON — no LLM needed
-    json_match = re.search(r'\{[\s\S]*"openapi"[\s\S]*"paths"[\s\S]*\}', markdown_content)
+    json_match = re.search(r'\{[\s\S]*"(?:openapi|swagger)"[\s\S]*"paths"[\s\S]*\}', markdown_content)
     if json_match:
         logger.info("OpenAPI spec detected — parsing directly without LLM")
         try:
