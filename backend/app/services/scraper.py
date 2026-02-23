@@ -76,7 +76,7 @@ async def scrape_page(url: str) -> ScrapeResult:
         return ScrapeResult(url=url, markdown="", error=str(e))
 
 
-async def scrape_docs(base_url: str, max_pages: int = 10) -> list[ScrapeResult]:
+async def scrape_docs(base_url: str, max_pages: int = 3) -> list[ScrapeResult]:
     """
     Recursively scrape documentation pages up to max_pages.
     Uses BFS (breadth-first) to prioritize top-level pages.

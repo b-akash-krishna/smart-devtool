@@ -321,3 +321,50 @@ async def get_suggestions(project_id: str, db: AsyncSession = Depends(get_db)):
         "use_case": project.use_case,
         "suggestions": project.integration_suggestions or []
     }
+
+@router.post("/", response_model=ProjectResponse, status_code=201)
+async def create_project(
+    payload: ProjectCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    from urllib.parse import urlparse
+    parsed = urlparse(str(payload.url))
+    api_base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+    # Check cache — if same URL was already completed, return it
+    from datetime import datetime, timezone, timedelta
+
+    existing = await db.execute(
+        select(Project).where(
+            Project.base_url == api_base_url,
+            Project.status == ProjectStatus.COMPLETED,
+            Project.created_at >= datetime.now(timezone.utc) - timedelta(hours=24),
+        ).order_by(Project.created_at.desc())
+    )
+    cached = existing.scalar_one_or_none()
+
+    if cached:
+        # Update name to what user typed, keep everything else
+        cached.name = payload.name
+        cached.use_case = payload.use_case
+        await db.commit()
+        await db.refresh(cached)
+        return cached
+
+    # No cache hit — create new project and start pipeline
+    project = Project(
+        name=payload.name,
+        base_url=api_base_url,
+        use_case=payload.use_case,
+    )
+    db.add(project)
+    await db.commit()
+    await db.refresh(project)
+    background_tasks.add_task(
+        run_scrape_and_parse_job,
+        project.id,
+        str(payload.url),
+        payload.use_case,
+    )
+    return project

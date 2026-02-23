@@ -31,6 +31,7 @@ export default function Home() {
   const logsEndRef = useRef<HTMLDivElement>(null);
   const [useCase, setUseCase] = useState("");
   const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [fromCache, setFromCache] = useState(false);
 
   const stopPolling = () => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -95,6 +96,7 @@ export default function Home() {
     setError("");
     setProject(null);
     setEndpoints(null);
+    setFromCache(false);
     setSuggestions([]);
     setLogs([]);
     setShowLogs(false);
@@ -102,8 +104,18 @@ export default function Home() {
     try {
       const p = await createProject(name, url, useCase);
       setProject(p);
-      startPolling(p.id);
-      startLogs(p.id);
+      if (p.status === "COMPLETED") {
+          // Cache hit — no need to poll
+          setFromCache(true);
+          const eps = await getEndpoints(p.id);
+          setEndpoints(eps);
+          const sugg = await getSuggestions(p.id);
+          setSuggestions(sugg.suggestions || []);
+      } else {
+          setFromCache(false);
+          startPolling(p.id);
+          startLogs(p.id);
+      }
     } catch {
       setError("Failed to create project. Is the backend running?");
     } finally {
@@ -289,6 +301,11 @@ export default function Home() {
                   <p className="text-sm text-slate-500 font-mono mt-1">{project.base_url}</p>
                 </div>
                 <StatusBadge status={project.status} />
+                {fromCache && (
+                    <span className="flex items-center gap-1.5 text-xs bg-green-500/10 text-green-400 border border-green-500/20 px-2.5 py-1 rounded-full">
+                        ⚡ Served from cache
+                    </span>
+                )}
               </div>
               {isProcessing && (
                 <div className="mt-4 h-1 bg-white/10 rounded-full overflow-hidden">

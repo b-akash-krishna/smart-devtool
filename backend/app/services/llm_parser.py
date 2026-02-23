@@ -102,7 +102,7 @@ Documentation:
 {content}"""
 
 
-def _chunk_text(text: str, max_chars: int = 12000) -> list[str]:
+def _chunk_text(text: str, max_chars: int = 6000) -> list[str]:
     """Split large docs into chunks that fit in the LLM context window."""
     if len(text) <= max_chars:
         return [text]
@@ -218,20 +218,36 @@ async def parse_documentation(markdown_content: str, base_url: str = "", use_cas
 
     # LLM path: for unstructured HTML/Markdown documentation
     logger.info("No OpenAPI spec detected — using LLM parser")
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
-        google_api_key=settings.gemini_api_key,
-        temperature=0,
-    )
+    
+    def _get_llm(use_groq: bool = True):
+        if use_groq and settings.groq_api_key:
+            from langchain_groq import ChatGroq
+            logger.info("Using Groq (primary)")
+            return ChatGroq(
+                model="llama-3.3-70b-versatile",
+                api_key=settings.groq_api_key,
+                temperature=0,
+            )
+        else:
+            logger.info("Using Gemini (fallback)")
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash",
+                google_api_key=settings.gemini_api_key,
+                temperature=0,
+            )
+
+    llm = _get_llm(use_groq=True)
 
     chunks = _chunk_text(markdown_content)
     logger.info(f"Parsing {len(chunks)} chunk(s) of documentation")
 
     schemas = []
+    use_groq = True  # start with Groq
+    
     for i, chunk in enumerate(chunks):
         logger.info(f"Processing chunk {i+1}/{len(chunks)}")
         if i > 0:
-            await asyncio.sleep(5)
+            await asyncio.sleep(2)  # reduced from 5s since Groq is faster
         try:
             use_case_context = (
                 f"The developer wants to use this API for: {use_case}\n"
@@ -263,6 +279,24 @@ async def parse_documentation(markdown_content: str, base_url: str = "", use_cas
             logger.error(f"JSON parse error on chunk {i+1}: {e}")
         except Exception as e:
             logger.error(f"LLM error on chunk {i+1}: {e}")
+            # If Groq failed, switch to Gemini for remaining chunks
+            if use_groq:
+                logger.warning("Groq failed — falling back to Gemini for remaining chunks")
+                use_groq = False
+                llm = _get_llm(use_groq=False)
+                # Retry this chunk with Gemini
+                try:
+                    response = await llm.ainvoke(messages)
+                    raw = response.content.strip()
+                    if raw.startswith("```"):
+                        raw = raw.split("```")[1]
+                        if raw.startswith("json"):
+                            raw = raw[4:]
+                    raw = raw.strip()
+                    data = json.loads(raw)
+                    schemas.append(APISchema(**data))
+                except Exception as e2:
+                    logger.error(f"Gemini fallback also failed on chunk {i+1}: {e2}")
 
     merged = _merge_schemas(schemas)
     if base_url and not merged.base_url:
