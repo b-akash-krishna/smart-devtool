@@ -42,9 +42,9 @@ export interface EndpointsResponse {
 }
 
 export const createProject = async (
-  name: string, url: string, use_case: string = ""
+  name: string, url: string, use_case: string = "", force_refresh: boolean = false
 ): Promise<Project> => {
-  const { data } = await api.post("/api/v1/projects", { name, url, use_case });
+  const { data } = await api.post("/api/v1/projects", { name, url, use_case, force_refresh });
   return data;
 };
 

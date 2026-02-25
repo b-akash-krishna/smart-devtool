@@ -1,40 +1,78 @@
 "use client";
 
 import { useState } from "react";
-import { Play, ChevronDown, ChevronUp } from "lucide-react";
+import { Play, ChevronDown, ChevronUp, Lock } from "lucide-react";
 import { Endpoint } from "@/lib/api";
+
+interface AuthScheme {
+  type: string;
+  header_name?: string;
+  description?: string;
+}
 
 interface Props {
   endpoint: Endpoint;
   baseUrl: string;
+  auth?: AuthScheme;
 }
 
-export default function TryItPlayground({ endpoint, baseUrl }: Props) {
+export default function TryItPlayground({ endpoint, baseUrl, auth }: Props) {
   const [open, setOpen] = useState(false);
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [response, setResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<number | null>(null);
+  const [authToken, setAuthToken] = useState("");
+
+  const authRequired = auth && auth.type !== "none";
+  const isApiKey = auth?.type === "api_key";
+  const headerName = auth?.header_name || "Authorization";
 
   const handleRun = async () => {
     setLoading(true);
     setResponse(null);
     try {
-      const url = new URL(`${baseUrl}${endpoint.path}`);
+      // Build URL with path params substituted
+      let path = endpoint.path;
+      endpoint.parameters?.forEach(p => {
+        if (p.location === "path" && paramValues[p.name]) {
+          path = path.replace(`{${p.name}}`, paramValues[p.name]);
+        }
+      });
+
+      const url = new URL(`${baseUrl}${path}`);
       endpoint.parameters?.forEach(p => {
         if (p.location === "query" && paramValues[p.name]) {
           url.searchParams.set(p.name, paramValues[p.name]);
         }
       });
 
+      // Build headers
+      const headers: Record<string, string> = { Accept: "application/json" };
+      if (authToken) {
+        if (isApiKey) {
+          headers[headerName] = authToken;
+        } else {
+          // Bearer token — prepend "Bearer " if not already present
+          headers[headerName] = authToken.startsWith("Bearer ")
+            ? authToken
+            : `Bearer ${authToken}`;
+        }
+      }
+
       const res = await fetch(url.toString(), {
         method: endpoint.method,
-        headers: { "Accept": "application/json" },
+        headers,
       });
 
       setStatus(res.status);
-      const data = await res.json();
-      setResponse(JSON.stringify(data, null, 2));
+      try {
+        const data = await res.json();
+        setResponse(JSON.stringify(data, null, 2));
+      } catch {
+        const text = await res.text();
+        setResponse(text || "(empty response)");
+      }
     } catch (e: any) {
       setResponse(`Error: ${e.message}`);
       setStatus(null);
@@ -56,7 +94,25 @@ export default function TryItPlayground({ endpoint, baseUrl }: Props) {
 
       {open && (
         <div className="mt-3 space-y-3">
-          {/* Parameters */}
+
+          {/* Auth token input */}
+          {authRequired && (
+            <div className="flex items-center gap-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <Lock className="w-3.5 h-3.5 text-yellow-600 shrink-0" />
+              <label className="text-xs font-mono text-yellow-700 w-24 shrink-0">
+                {isApiKey ? "API Key" : "Bearer Token"}
+              </label>
+              <input
+                type="password"
+                placeholder={isApiKey ? "your-api-key" : "your-token (without 'Bearer ')"}
+                value={authToken}
+                onChange={e => setAuthToken(e.target.value)}
+                className="flex-1 text-xs border border-yellow-300 bg-white rounded px-2 py-1.5 font-mono focus:outline-none focus:border-yellow-500"
+              />
+            </div>
+          )}
+
+          {/* Query parameters */}
           {endpoint.parameters?.filter(p => p.location === "query").map(param => (
             <div key={param.name} className="flex items-center gap-3">
               <label className="text-xs font-mono text-gray-500 w-28 shrink-0">
@@ -66,6 +122,24 @@ export default function TryItPlayground({ endpoint, baseUrl }: Props) {
               <input
                 type="text"
                 placeholder={param.type}
+                value={paramValues[param.name] || ""}
+                onChange={e => setParamValues(prev => ({ ...prev, [param.name]: e.target.value }))}
+                className="flex-1 text-xs border border-gray-200 rounded px-2 py-1.5 font-mono focus:outline-none focus:border-blue-400"
+              />
+            </div>
+          ))}
+
+          {/* Path parameters */}
+          {endpoint.parameters?.filter(p => p.location === "path").map(param => (
+            <div key={param.name} className="flex items-center gap-3">
+              <label className="text-xs font-mono text-gray-500 w-28 shrink-0">
+                {param.name}
+                <span className="text-red-400 ml-0.5">*</span>
+                <span className="text-gray-400 ml-1">(path)</span>
+              </label>
+              <input
+                type="text"
+                placeholder={`Enter ${param.name}`}
                 value={paramValues[param.name] || ""}
                 onChange={e => setParamValues(prev => ({ ...prev, [param.name]: e.target.value }))}
                 className="flex-1 text-xs border border-gray-200 rounded px-2 py-1.5 font-mono focus:outline-none focus:border-blue-400"

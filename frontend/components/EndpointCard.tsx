@@ -9,12 +9,19 @@ const METHOD_COLORS: Record<string, string> = {
   PATCH:  "bg-purple-100 text-purple-700 border-purple-200",
 };
 
+interface AuthScheme {
+  type: string;
+  header_name?: string;
+  description?: string;
+}
+
 interface Props {
   endpoint: Endpoint;
   baseUrl: string;
+  auth?: AuthScheme;
 }
 
-export default function EndpointCard({ endpoint, baseUrl }: Props) {
+export default function EndpointCard({ endpoint, baseUrl, auth }: Props) {
   return (
     <div className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow bg-white">
       <div className="flex items-center gap-3 mb-2">
@@ -48,7 +55,7 @@ export default function EndpointCard({ endpoint, baseUrl }: Props) {
           </div>
         </div>
       )}
-      <TryItPlayground endpoint={endpoint} baseUrl={baseUrl} />
+      <TryItPlayground endpoint={endpoint} baseUrl={baseUrl} auth={auth} />
     </div>
   );
 }

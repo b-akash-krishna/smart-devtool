@@ -8,6 +8,7 @@ class ProjectCreate(BaseModel):
     name: str
     url: HttpUrl
     use_case: str = ""
+    force_refresh: bool = False
 
 
 class ProjectResponse(BaseModel):

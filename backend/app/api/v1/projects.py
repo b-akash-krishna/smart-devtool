@@ -1,25 +1,21 @@
 import logging
 from uuid import UUID
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import io
+import yaml
 
 from app.core.database import get_db
 from app.models.project import APIEndpoint, Project, ProjectStatus
 from app.schemas.project import ProjectCreate, ProjectResponse, ScrapeStatusResponse
 from app.services.scraper import scrape_docs
-from app.services.llm_parser import parse_documentation
-
-import io
-from fastapi.responses import StreamingResponse
-from app.services.codegen import generate_sdk
-
-from fastapi.responses import JSONResponse, StreamingResponse, Response
-
-from app.core.log_store import append_log
-
 from app.services.llm_parser import parse_documentation, suggest_integration_paths
+from app.services.codegen import generate_sdk
+from app.core.log_store import append_log, subscribe, get_logs
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -38,7 +34,7 @@ async def run_scrape_and_parse_job(project_id: UUID, url: str, use_case: str = "
             project.status = ProjectStatus.SCRAPING
             await db.commit()
 
-            scrape_results = await scrape_docs(url, max_pages=5)
+            scrape_results = await scrape_docs(url, max_pages=3)
             append_log(str(project_id), f"✅ Scraped {len(scrape_results)} page(s) successfully")
 
             combined_markdown = "\n\n---\n\n".join(
@@ -51,13 +47,11 @@ async def run_scrape_and_parse_job(project_id: UUID, url: str, use_case: str = "
             project.status = ProjectStatus.PARSING
             await db.commit()
 
-            # Pass use_case to parser
             api_schema = await parse_documentation(
                 combined_markdown, base_url=url, use_case=use_case
             )
             append_log(str(project_id), f"📋 Discovered {len(api_schema.endpoints)} endpoint(s)")
 
-            # Generate integration suggestions
             append_log(str(project_id), "💡 Generating integration path suggestions...")
             suggestions = await suggest_integration_paths(api_schema, use_case)
             project.integration_suggestions = suggestions
@@ -99,6 +93,14 @@ async def run_scrape_and_parse_job(project_id: UUID, url: str, use_case: str = "
                 await db.commit()
 
 
+@router.get("/", response_model=list[ProjectResponse])
+async def list_projects(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Project).order_by(Project.created_at.desc()).limit(20)
+    )
+    return result.scalars().all()
+
+
 @router.post("/", response_model=ProjectResponse, status_code=201)
 async def create_project(
     payload: ProjectCreate,
@@ -109,25 +111,46 @@ async def create_project(
     parsed = urlparse(str(payload.url))
     api_base_url = f"{parsed.scheme}://{parsed.netloc}"
     
+    if not payload.force_refresh:
+        # Cache check — return existing completed project if same URL scraped in last 24h
+        existing = await db.execute(
+            select(Project).where(
+                Project.base_url == api_base_url,
+                Project.status == ProjectStatus.COMPLETED,
+                Project.created_at >= datetime.now(timezone.utc) - timedelta(hours=24),
+            ).order_by(Project.created_at.desc()).limit(1)
+        )
+        cached = existing.scalar_one_or_none()
+
+        if cached:
+            cached.name = payload.name
+            cached.use_case = payload.use_case
+            await db.commit()
+            await db.refresh(cached)
+            logger.info(f"Cache hit for {api_base_url} — returning project {cached.id}")
+            return cached
+
+    # No cache hit — create new project and run pipeline
     project = Project(
         name=payload.name,
         base_url=api_base_url,
-        use_case=payload.use_case
+        use_case=payload.use_case,
     )
     db.add(project)
     await db.commit()
     await db.refresh(project)
     background_tasks.add_task(
-        run_scrape_and_parse_job, project.id, str(payload.url), payload.use_case
+        run_scrape_and_parse_job,
+        project.id,
+        str(payload.url),
+        payload.use_case,
     )
     return project
 
 
 @router.get("/{project_id}", response_model=ScrapeStatusResponse)
 async def get_project(project_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
+    result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -136,18 +159,16 @@ async def get_project(project_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/{project_id}/endpoints")
 async def get_endpoints(project_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
+    result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
     ep_result = await db.execute(
         select(APIEndpoint).where(APIEndpoint.project_id == project_id)
     )
     endpoints = ep_result.scalars().all()
-    
+
     return {
         "project_id": project_id,
         "api_name": project.api_name,
@@ -165,11 +186,6 @@ async def get_endpoints(project_id: str, db: AsyncSession = Depends(get_db)):
             for ep in endpoints
         ],
     }
-
-import json
-from fastapi.responses import StreamingResponse
-import io
-from app.services.codegen import generate_sdk
 
 
 @router.post("/{project_id}/generate")
@@ -223,21 +239,12 @@ async def generate_code(
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
-@router.get("/", response_model=list[ProjectResponse])
-async def list_projects(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Project).order_by(Project.created_at.desc()).limit(20)
-    )
-    return result.scalars().all()
-
-from fastapi.responses import JSONResponse
-import yaml
 
 @router.get("/{project_id}/export")
 async def export_openapi(
     project_id: str,
     format: str = "json",
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
@@ -249,7 +256,6 @@ async def export_openapi(
     )
     endpoints = ep_result.scalars().all()
 
-    # Build OpenAPI 3.0 spec
     paths = {}
     for ep in endpoints:
         parameters = []
@@ -261,7 +267,6 @@ async def export_openapi(
                 "description": p.get("description", ""),
                 "schema": {"type": p.get("type", "string")}
             })
-        
         paths[ep.path] = {
             ep.method.lower(): {
                 "summary": ep.summary or "",
@@ -279,25 +284,22 @@ async def export_openapi(
             "version": "1.0.0",
             "description": project.api_description or ""
         },
-        "paths": paths
+        "paths": paths,
     }
 
     if format == "yaml":
-        import yaml
         content = yaml.dump(spec, default_flow_style=False, sort_keys=False)
         return Response(
             content=content,
             media_type="application/yaml",
-            headers={"Content-Disposition": f"attachment; filename=openapi.yaml"}
+            headers={"Content-Disposition": "attachment; filename=openapi.yaml"}
         )
-    
+
     return JSONResponse(
         content=spec,
-        headers={"Content-Disposition": f"attachment; filename=openapi.json"}
+        headers={"Content-Disposition": "attachment; filename=openapi.json"}
     )
 
-from fastapi.responses import StreamingResponse
-from app.core.log_store import subscribe, get_logs
 
 @router.get("/{project_id}/logs")
 async def stream_logs(project_id: str):
@@ -309,6 +311,7 @@ async def stream_logs(project_id: str):
             "X-Accel-Buffering": "no",
         }
     )
+
 
 @router.get("/{project_id}/suggestions")
 async def get_suggestions(project_id: str, db: AsyncSession = Depends(get_db)):
@@ -322,49 +325,17 @@ async def get_suggestions(project_id: str, db: AsyncSession = Depends(get_db)):
         "suggestions": project.integration_suggestions or []
     }
 
-@router.post("/", response_model=ProjectResponse, status_code=201)
-async def create_project(
-    payload: ProjectCreate,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-):
-    from urllib.parse import urlparse
-    parsed = urlparse(str(payload.url))
-    api_base_url = f"{parsed.scheme}://{parsed.netloc}"
-
-    # Check cache — if same URL was already completed, return it
-    from datetime import datetime, timezone, timedelta
-
-    existing = await db.execute(
-        select(Project).where(
-            Project.base_url == api_base_url,
-            Project.status == ProjectStatus.COMPLETED,
-            Project.created_at >= datetime.now(timezone.utc) - timedelta(hours=24),
-        ).order_by(Project.created_at.desc())
+@router.delete("/{project_id}")
+async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Delete endpoints first (foreign key)
+    await db.execute(
+        APIEndpoint.__table__.delete().where(APIEndpoint.project_id == project_id)
     )
-    cached = existing.scalar_one_or_none()
-
-    if cached:
-        # Update name to what user typed, keep everything else
-        cached.name = payload.name
-        cached.use_case = payload.use_case
-        await db.commit()
-        await db.refresh(cached)
-        return cached
-
-    # No cache hit — create new project and start pipeline
-    project = Project(
-        name=payload.name,
-        base_url=api_base_url,
-        use_case=payload.use_case,
-    )
-    db.add(project)
+    await db.delete(project)
     await db.commit()
-    await db.refresh(project)
-    background_tasks.add_task(
-        run_scrape_and_parse_job,
-        project.id,
-        str(payload.url),
-        payload.use_case,
-    )
-    return project
+    return {"deleted": project_id}

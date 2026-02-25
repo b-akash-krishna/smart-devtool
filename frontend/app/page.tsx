@@ -11,6 +11,7 @@ import StatusBadge from "@/components/StatusBadge";
 import EndpointCard from "@/components/EndpointCard";
 
 
+
 import IntegrationSuggestions from "@/components/IntegrationSuggestions";
 
 export default function Home() {
@@ -32,6 +33,8 @@ export default function Home() {
   const [useCase, setUseCase] = useState("");
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [fromCache, setFromCache] = useState(false);
+  const [forceRefresh, setForceRefresh] = useState(false);
+
 
   const stopPolling = () => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -102,7 +105,7 @@ export default function Home() {
     setShowLogs(false);
     setLoading(true);
     try {
-      const p = await createProject(name, url, useCase);
+      const p = await createProject(name, url, useCase, forceRefresh);
       setProject(p);
       if (p.status === "COMPLETED") {
           // Cache hit — no need to poll
@@ -268,6 +271,15 @@ export default function Home() {
               <Zap className="w-4 h-4" />
               {loading ? "Starting..." : "Generate SDK"}
             </button>
+            <label className="flex items-center gap-2 text-xs text-gray-500">
+              <input
+                type="checkbox"
+                checked={forceRefresh}
+                onChange={e => setForceRefresh(e.target.checked)}
+                className="rounded"
+              />
+              Force re-scrape (bypass cache)
+            </label>
           </div>
           {error && <p className="text-red-400 text-sm mt-3">{error}</p>}
         </div>
@@ -373,7 +385,12 @@ export default function Home() {
                 </div>
                 <div className="space-y-3">
                   {endpoints.endpoints.map(ep => (
-                    <EndpointCard key={ep.id} endpoint={ep} baseUrl={project.base_url} />
+                    <EndpointCard
+                      key={ep.id}
+                      endpoint={ep}
+                      baseUrl={project.base_url}
+                      authScheme={project.auth_scheme}   // add this line
+                    />
                   ))}
                 </div>
               </div>
