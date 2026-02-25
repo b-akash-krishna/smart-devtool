@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     debug: bool = True
 
     database_url: str
-    redis_url: str
+    redis_url: str = "redis://redis:6379"
     gemini_api_key: str
     groq_api_key: str
 

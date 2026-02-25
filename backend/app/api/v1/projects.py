@@ -100,13 +100,26 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
     )
     return result.scalars().all()
 
+from fastapi import Request
+from app.core.rate_limiter import check_rate_limit
 
 @router.post("/", response_model=ProjectResponse, status_code=201)
 async def create_project(
     payload: ProjectCreate,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
+    # Rate limiting
+    ip = request.client.host if request else "unknown"
+    allowed, retry_after = await check_rate_limit(ip, limit=10, window_seconds=3600)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded. Try again in {retry_after // 60} minutes.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     from urllib.parse import urlparse
     parsed = urlparse(str(payload.url))
     api_base_url = f"{parsed.scheme}://{parsed.netloc}"

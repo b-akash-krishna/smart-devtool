@@ -119,8 +119,12 @@ export default function Home() {
           startPolling(p.id);
           startLogs(p.id);
       }
-    } catch {
-      setError("Failed to create project. Is the backend running?");
+    } catch (err: any) {
+      if (err.response?.status === 429) {
+        setError(`⏳ Rate limit reached. ${err.response.data.detail}`);
+      } else {
+        setError("Failed to create project. Is the backend running?");
+      }
     } finally {
       setLoading(false);
     }
