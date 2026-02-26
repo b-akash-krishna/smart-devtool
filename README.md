@@ -61,7 +61,7 @@ Paste a docs URL → Get a working, typed SDK you can `import` immediately.
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/YOUR_USERNAME/smart-devtool.git
+git clone https://github.com/b-akash-krishna/smart-devtool.git
 cd smart-devtool
 ```
 
