@@ -22,7 +22,7 @@ interface AuthScheme {
 interface Props {
   endpoint: Endpoint;
   baseUrl: string;
-  auth?: AuthScheme;
+  auth?: AuthScheme | null;
   isEditing?: boolean;
   onUpdate?: (updated: Endpoint) => void;
   onDelete?: (id: string) => void;

@@ -13,7 +13,7 @@ interface AuthScheme {
 interface Props {
   endpoint: Endpoint;
   baseUrl: string;
-  auth?: AuthScheme;
+  auth?: AuthScheme | null;
 }
 
 export default function TryItPlayground({ endpoint, baseUrl, auth }: Props) {
