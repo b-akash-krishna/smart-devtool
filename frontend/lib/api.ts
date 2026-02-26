@@ -41,6 +41,13 @@ export interface EndpointsResponse {
   endpoints: Endpoint[];
 }
 
+export interface RateLimitStatus {
+  used: number;
+  limit: number;
+  remaining: number;
+  reset_in_seconds: number;
+}
+
 export const createProject = async (
   name: string, url: string, use_case: string = "", force_refresh: boolean = false
 ): Promise<Project> => {
@@ -71,6 +78,16 @@ export const generateSDK = async (
     { responseType: "blob" }
   );
   return response.data;
+};
+
+export const previewSDK = async (id: string, language: string): Promise<string> => {
+  const { data } = await api.get(`/api/v1/projects/${id}/preview?language=${language}`);
+  return data;
+};
+
+export const getRateLimitStatus = async (): Promise<RateLimitStatus> => {
+  const { data } = await api.get("/api/v1/projects/rate-limit-status");
+  return data;
 };
 
 export const listProjects = async (): Promise<Project[]> => {

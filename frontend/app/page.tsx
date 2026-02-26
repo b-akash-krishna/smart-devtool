@@ -1,15 +1,16 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Download, Zap, Globe, Code2, History, FileJson, Terminal, Pencil, Check, X } from "lucide-react";
+import { Download, Zap, Globe, History, FileJson, Terminal, Pencil, Check, X, Eye } from "lucide-react";
 import {
   createProject, getProject, getEndpoints, generateSDK,
-  listProjects, exportOpenAPI, getSuggestions,
-  Project, Endpoint, EndpointsResponse
+  listProjects, exportOpenAPI, getSuggestions, getRateLimitStatus,
+  Project, Endpoint, EndpointsResponse, RateLimitStatus
 } from "@/lib/api";
 import StatusBadge from "@/components/StatusBadge";
 import EndpointCard from "@/components/EndpointCard";
 import IntegrationSuggestions from "@/components/IntegrationSuggestions";
+import SDKPreviewModal from "@/components/SDKPreviewModal";
 
 export default function Home() {
   const [url, setUrl] = useState("");
@@ -21,11 +22,13 @@ export default function Home() {
   const [isEditing, setIsEditing] = useState(false);
   const [language, setLanguage] = useState<"python" | "typescript">("python");
   const [generating, setGenerating] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<Project[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
+  const [rateLimit, setRateLimit] = useState<RateLimitStatus | null>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -66,6 +69,7 @@ export default function Home() {
           const sugg = await getSuggestions(projectId);
           setSuggestions(sugg.suggestions || []);
           loadHistory();
+          fetchRateLimit();
         } else if (updated.status === "FAILED") {
           stopPolling();
           setError("Processing failed. Please try again.");
@@ -78,11 +82,19 @@ export default function Home() {
     try {
       const projects = await listProjects();
       setHistory(projects);
-    } catch { }
+    } catch {}
+  };
+
+  const fetchRateLimit = async () => {
+    try {
+      const status = await getRateLimitStatus();
+      setRateLimit(status);
+    } catch {}
   };
 
   useEffect(() => {
     loadHistory();
+    fetchRateLimit();
     return () => {
       stopPolling();
       eventSourceRef.current?.close();
@@ -115,6 +127,7 @@ export default function Home() {
         setEditedEndpoints(eps.endpoints);
         const sugg = await getSuggestions(p.id);
         setSuggestions(sugg.suggestions || []);
+        fetchRateLimit();
       } else {
         setFromCache(false);
         startPolling(p.id);
@@ -126,6 +139,7 @@ export default function Home() {
       } else {
         setError("Failed to create project. Is the backend running?");
       }
+      fetchRateLimit();
     } finally {
       setLoading(false);
     }
@@ -142,6 +156,7 @@ export default function Home() {
   const handleDownload = async () => {
     if (!project) return;
     setGenerating(true);
+    setShowPreview(false);
     try {
       const blob = await generateSDK(project.id, language, editedEndpoints);
       const downloadUrl = URL.createObjectURL(blob);
@@ -179,9 +194,28 @@ export default function Home() {
   };
 
   const isProcessing = project && !["COMPLETED", "FAILED"].includes(project.status);
-  const displayedEndpoints = editedEndpoints;
+
+  // Rate limit display
+  const rateLimitColor = !rateLimit ? "text-slate-500"
+    : rateLimit.remaining <= 2 ? "text-red-400"
+    : rateLimit.remaining <= 5 ? "text-yellow-400"
+    : "text-green-400";
+
+  const resetMinutes = rateLimit ? Math.ceil(rateLimit.reset_in_seconds / 60) : 0;
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+      {/* SDK Preview Modal */}
+      {showPreview && project && (
+        <SDKPreviewModal
+          projectId={project.id}
+          language={language}
+          apiName={project.api_name || project.name}
+          onClose={() => setShowPreview(false)}
+          onDownload={handleDownload}
+        />
+      )}
+
       {/* Header */}
       <header className="border-b border-white/10 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -191,13 +225,22 @@ export default function Home() {
           <h1 className="text-xl font-bold">Smart DevTool</h1>
           <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full">beta</span>
         </div>
-        <button
-          onClick={() => { setShowHistory(!showHistory); loadHistory(); }}
-          className="flex items-center gap-2 text-slate-400 hover:text-white transition text-sm"
-        >
-          <History className="w-4 h-4" />
-          History ({history.length})
-        </button>
+        <div className="flex items-center gap-4">
+          {/* Rate limit indicator */}
+          {rateLimit && (
+            <div className={`text-xs ${rateLimitColor} flex items-center gap-1.5`} title={`Resets in ${resetMinutes} min`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${rateLimit.remaining <= 2 ? "bg-red-400" : rateLimit.remaining <= 5 ? "bg-yellow-400" : "bg-green-400"}`} />
+              {rateLimit.remaining}/{rateLimit.limit} requests left
+            </div>
+          )}
+          <button
+            onClick={() => { setShowHistory(!showHistory); loadHistory(); }}
+            className="flex items-center gap-2 text-slate-400 hover:text-white transition text-sm"
+          >
+            <History className="w-4 h-4" />
+            History ({history.length})
+          </button>
+        </div>
       </header>
 
       <div className="max-w-4xl mx-auto px-6 py-12">
@@ -267,11 +310,11 @@ export default function Home() {
               </div>
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">
-                  Use Case <span className="text-slate-600">(optional but recommended)</span>
+                  Use Case <span className="text-slate-600">(optional)</span>
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Build a cat facts Telegram bot in Python"
+                  placeholder="e.g. Build a cat facts Telegram bot"
                   value={useCase}
                   onChange={e => setUseCase(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
@@ -359,19 +402,18 @@ export default function Home() {
               <IntegrationSuggestions suggestions={suggestions} />
             )}
 
-            {endpoints && displayedEndpoints.length > 0 && (
+            {endpoints && editedEndpoints.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     <h3 className="font-semibold text-slate-200">
-                      {displayedEndpoints.length} Endpoint{displayedEndpoints.length !== 1 ? "s" : ""}
-                      {isEditing && endpoints.endpoints.length !== displayedEndpoints.length && (
+                      {editedEndpoints.length} Endpoint{editedEndpoints.length !== 1 ? "s" : ""}
+                      {endpoints.endpoints.length !== editedEndpoints.length && (
                         <span className="text-slate-500 text-sm ml-1">
                           (of {endpoints.endpoints.length})
                         </span>
                       )}
                     </h3>
-                    {/* Edit toggle */}
                     {!isEditing ? (
                       <button
                         onClick={() => setIsEditing(true)}
@@ -384,16 +426,13 @@ export default function Home() {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => setIsEditing(false)}
-                          className="flex items-center gap-1.5 text-xs text-green-400 hover:text-green-300 border border-green-500/30 hover:border-green-500/50 px-2.5 py-1 rounded-lg transition"
+                          className="flex items-center gap-1.5 text-xs text-green-400 hover:text-green-300 border border-green-500/30 px-2.5 py-1 rounded-lg transition"
                         >
                           <Check className="w-3 h-3" />
                           Done
                         </button>
                         <button
-                          onClick={() => {
-                            setEditedEndpoints(endpoints.endpoints);
-                            setIsEditing(false);
-                          }}
+                          onClick={() => { setEditedEndpoints(endpoints.endpoints); setIsEditing(false); }}
                           className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white border border-white/10 px-2.5 py-1 rounded-lg transition"
                         >
                           <X className="w-3 h-3" />
@@ -403,7 +442,6 @@ export default function Home() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    {/* OpenAPI Export */}
                     <button
                       onClick={() => handleExport("json")}
                       className="flex items-center gap-1.5 text-xs bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 px-3 py-1.5 rounded-lg transition"
@@ -418,7 +456,6 @@ export default function Home() {
                       <FileJson className="w-3.5 h-3.5" />
                       YAML
                     </button>
-                    {/* SDK Download */}
                     <select
                       value={language}
                       onChange={e => setLanguage(e.target.value as "python" | "typescript")}
@@ -427,6 +464,13 @@ export default function Home() {
                       <option value="python">Python</option>
                       <option value="typescript">TypeScript</option>
                     </select>
+                    <button
+                      onClick={() => setShowPreview(true)}
+                      className="flex items-center gap-2 bg-white/10 hover:bg-white/15 text-white text-sm px-4 py-1.5 rounded-lg transition"
+                    >
+                      <Eye className="w-4 h-4" />
+                      Preview
+                    </button>
                     <button
                       onClick={handleDownload}
                       disabled={generating}
@@ -438,7 +482,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="space-y-3">
-                  {displayedEndpoints.map(ep => (
+                  {editedEndpoints.map(ep => (
                     <EndpointCard
                       key={ep.id}
                       endpoint={ep}

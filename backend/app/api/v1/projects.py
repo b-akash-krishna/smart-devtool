@@ -2,7 +2,7 @@ import logging
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -16,6 +16,7 @@ from app.services.scraper import scrape_docs
 from app.services.llm_parser import parse_documentation, suggest_integration_paths
 from app.services.codegen import generate_sdk
 from app.core.log_store import append_log, subscribe, get_logs
+from app.core.rate_limiter import check_rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -93,6 +94,86 @@ async def run_scrape_and_parse_job(project_id: UUID, url: str, use_case: str = "
                 await db.commit()
 
 
+def _build_schema(project, endpoints, endpoint_override=None):
+    """Build SDK schema dict from project and endpoints."""
+    schema = {
+        "api_name": project.api_name or "MyAPI",
+        "version": "1.0.0",
+        "base_url": project.base_url,
+        "auth_scheme": project.auth_scheme,
+        "endpoints": [
+            {
+                "method": ep.method,
+                "path": ep.path,
+                "summary": ep.summary or "",
+                "description": ep.description or "",
+                "parameters": ep.parameters or [],
+                "request_body": ep.request_body or {},
+                "response_schema": ep.response_schema or {},
+                "tags": ep.tags or [],
+            }
+            for ep in endpoints
+        ],
+    }
+    if endpoint_override:
+        schema["endpoints"] = [
+            {
+                "method": ep["method"],
+                "path": ep["path"],
+                "summary": ep.get("summary", ""),
+                "description": ep.get("description", ""),
+                "parameters": ep.get("parameters", []),
+                "request_body": ep.get("request_body", {}),
+                "response_schema": ep.get("response_schema", {}),
+                "tags": ep.get("tags", []),
+            }
+            for ep in endpoint_override
+        ]
+    return schema
+
+
+@router.get("/rate-limit-status")
+async def rate_limit_status(request: Request):
+    """Returns current rate limit usage for the requesting IP."""
+    import time
+    import redis.asyncio as aioredis
+    from app.core.config import settings
+
+    ip = request.client.host if request.client else "unknown"
+    limit = 10
+    window_seconds = 3600
+
+    try:
+        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+        key = f"rate_limit:{ip}"
+        now = int(time.time())
+        window_start = now - window_seconds
+
+        pipe = r.pipeline()
+        pipe.zremrangebyscore(key, 0, window_start)
+        pipe.zcard(key)
+        pipe.zrange(key, 0, 0, withscores=True)  # oldest entry
+        results = await pipe.execute()
+        await r.aclose()
+
+        used = results[1]
+        oldest = results[2]
+        reset_in = window_seconds
+        if oldest:
+            oldest_ts = int(oldest[0][1])
+            reset_in = max(0, window_seconds - (now - oldest_ts))
+
+        return {
+            "used": used,
+            "limit": limit,
+            "remaining": max(0, limit - used),
+            "reset_in_seconds": reset_in,
+        }
+    except Exception as e:
+        logger.warning(f"Rate limit status error: {e}")
+        return {"used": 0, "limit": limit, "remaining": limit, "reset_in_seconds": 0}
+
+
 @router.get("/", response_model=list[ProjectResponse])
 async def list_projects(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -100,8 +181,6 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
     )
     return result.scalars().all()
 
-from fastapi import Request
-from app.core.rate_limiter import check_rate_limit
 
 @router.post("/", response_model=ProjectResponse, status_code=201)
 async def create_project(
@@ -110,7 +189,6 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
     request: Request = None,
 ):
-    # Rate limiting
     ip = request.client.host if request else "unknown"
     allowed, retry_after = await check_rate_limit(ip, limit=10, window_seconds=3600)
     if not allowed:
@@ -123,9 +201,8 @@ async def create_project(
     from urllib.parse import urlparse
     parsed = urlparse(str(payload.url))
     api_base_url = f"{parsed.scheme}://{parsed.netloc}"
-    
+
     if not payload.force_refresh:
-        # Cache check — return existing completed project if same URL scraped in last 24h
         existing = await db.execute(
             select(Project).where(
                 Project.base_url == api_base_url,
@@ -134,7 +211,6 @@ async def create_project(
             ).order_by(Project.created_at.desc()).limit(1)
         )
         cached = existing.scalar_one_or_none()
-
         if cached:
             cached.name = payload.name
             cached.use_case = payload.use_case
@@ -143,7 +219,6 @@ async def create_project(
             logger.info(f"Cache hit for {api_base_url} — returning project {cached.id}")
             return cached
 
-    # No cache hit — create new project and run pipeline
     project = Project(
         name=payload.name,
         base_url=api_base_url,
@@ -200,6 +275,47 @@ async def get_endpoints(project_id: str, db: AsyncSession = Depends(get_db)):
         ],
     }
 
+
+@router.get("/{project_id}/preview")
+async def preview_sdk(
+    project_id: str,
+    language: str = "python",
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns the generated SDK as plain text for in-browser preview."""
+    if language not in ["python", "typescript"]:
+        raise HTTPException(status_code=400, detail="Language must be 'python' or 'typescript'")
+
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.status != ProjectStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Project is not ready")
+
+    ep_result = await db.execute(
+        select(APIEndpoint).where(APIEndpoint.project_id == project_id)
+    )
+    endpoints = ep_result.scalars().all()
+    schema = _build_schema(project, endpoints)
+
+    # Generate zip and extract the main client file
+    import zipfile
+    zip_bytes = generate_sdk(schema, language)
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        # Find the main client file
+        names = zf.namelist()
+        client_file = next(
+            (n for n in names if "client" in n.lower() and n.endswith((".py", ".ts"))),
+            names[0] if names else None
+        )
+        if not client_file:
+            raise HTTPException(status_code=500, detail="Could not extract preview")
+        code = zf.read(client_file).decode("utf-8")
+
+    return Response(content=code, media_type="text/plain")
+
+
 @router.post("/{project_id}/generate")
 async def generate_code(
     project_id: str,
@@ -221,42 +337,8 @@ async def generate_code(
         select(APIEndpoint).where(APIEndpoint.project_id == project_id)
     )
     endpoints = ep_result.scalars().all()
-
-    schema = {
-        "api_name": project.api_name or "MyAPI",
-        "version": "1.0.0",
-        "base_url": project.base_url,
-        "auth_scheme": project.auth_scheme,
-        "endpoints": [
-            {
-                "method": ep.method,
-                "path": ep.path,
-                "summary": ep.summary or "",
-                "description": ep.description or "",
-                "parameters": ep.parameters or [],
-                "request_body": ep.request_body or {},
-                "response_schema": ep.response_schema or {},
-                "tags": ep.tags or [],
-            }
-            for ep in endpoints
-        ],
-    }
-
-    # Allow client to override endpoints (for edit-before-generate)
-    if "endpoints" in payload and payload["endpoints"]:
-        schema["endpoints"] = [
-            {
-                "method": ep["method"],
-                "path": ep["path"],
-                "summary": ep.get("summary", ""),
-                "description": ep.get("description", ""),
-                "parameters": ep.get("parameters", []),
-                "request_body": ep.get("request_body", {}),
-                "response_schema": ep.get("response_schema", {}),
-                "tags": ep.get("tags", []),
-            }
-            for ep in payload["endpoints"]
-        ]
+    endpoint_override = payload.get("endpoints") or None
+    schema = _build_schema(project, endpoints, endpoint_override)
 
     zip_bytes = generate_sdk(schema, language)
     filename = f"{project.api_name or 'sdk'}_{language}_sdk.zip".replace(" ", "_").lower()
@@ -266,6 +348,7 @@ async def generate_code(
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
 
 @router.get("/{project_id}/export")
 async def export_openapi(
@@ -352,14 +435,13 @@ async def get_suggestions(project_id: str, db: AsyncSession = Depends(get_db)):
         "suggestions": project.integration_suggestions or []
     }
 
+
 @router.delete("/{project_id}")
 async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Delete endpoints first (foreign key)
     await db.execute(
         APIEndpoint.__table__.delete().where(APIEndpoint.project_id == project_id)
     )
