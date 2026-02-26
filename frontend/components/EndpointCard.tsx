@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+import { Trash2, Pencil } from "lucide-react";
 import { Endpoint } from "@/lib/api";
 import TryItPlayground from "./TryItPlayground";
 
@@ -19,11 +23,20 @@ interface Props {
   endpoint: Endpoint;
   baseUrl: string;
   auth?: AuthScheme;
+  isEditing?: boolean;
+  onUpdate?: (updated: Endpoint) => void;
+  onDelete?: (id: string) => void;
 }
 
-export default function EndpointCard({ endpoint, baseUrl, auth }: Props) {
+export default function EndpointCard({ endpoint, baseUrl, auth, isEditing, onUpdate, onDelete }: Props) {
+  const [summary, setSummary] = useState(endpoint.summary || "");
+
+  const handleSummaryBlur = () => {
+    if (onUpdate) onUpdate({ ...endpoint, summary });
+  };
+
   return (
-    <div className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow bg-white">
+    <div className={`border rounded-lg p-4 transition-shadow bg-white ${isEditing ? "border-blue-300 shadow-sm" : "border-gray-200 hover:shadow-md"}`}>
       <div className="flex items-center gap-3 mb-2">
         <span className={`px-2 py-0.5 rounded border text-xs font-bold font-mono ${METHOD_COLORS[endpoint.method] ?? "bg-gray-100"}`}>
           {endpoint.method}
@@ -34,10 +47,35 @@ export default function EndpointCard({ endpoint, baseUrl, auth }: Props) {
             {tag}
           </span>
         ))}
+        {isEditing && (
+          <div className="ml-auto flex items-center gap-2">
+            <Pencil className="w-3.5 h-3.5 text-blue-400" />
+            <button
+              onClick={() => onDelete?.(endpoint.id)}
+              className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 transition"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Remove
+            </button>
+          </div>
+        )}
       </div>
-      {endpoint.summary && (
-        <p className="text-sm text-gray-600 mb-2">{endpoint.summary}</p>
+
+      {isEditing ? (
+        <input
+          type="text"
+          value={summary}
+          onChange={e => setSummary(e.target.value)}
+          onBlur={handleSummaryBlur}
+          placeholder="Endpoint summary..."
+          className="w-full text-sm border border-blue-200 rounded px-2 py-1 mb-2 focus:outline-none focus:border-blue-400 text-gray-700"
+        />
+      ) : (
+        endpoint.summary && (
+          <p className="text-sm text-gray-600 mb-2">{endpoint.summary}</p>
+        )
       )}
+
       {endpoint.parameters?.length > 0 && (
         <div className="mt-2">
           <p className="text-xs font-semibold text-gray-400 uppercase mb-1">Parameters</p>
@@ -55,7 +93,8 @@ export default function EndpointCard({ endpoint, baseUrl, auth }: Props) {
           </div>
         </div>
       )}
-      <TryItPlayground endpoint={endpoint} baseUrl={baseUrl} auth={auth} />
+
+      {!isEditing && <TryItPlayground endpoint={endpoint} baseUrl={baseUrl} auth={auth} />}
     </div>
   );
 }

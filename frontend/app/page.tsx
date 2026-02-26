@@ -1,17 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Download, Zap, Globe, Code2, History, FileJson, Terminal } from "lucide-react";
+import { Download, Zap, Globe, Code2, History, FileJson, Terminal, Pencil, Check, X } from "lucide-react";
 import {
   createProject, getProject, getEndpoints, generateSDK,
   listProjects, exportOpenAPI, getSuggestions,
-  Project, EndpointsResponse
+  Project, Endpoint, EndpointsResponse
 } from "@/lib/api";
 import StatusBadge from "@/components/StatusBadge";
 import EndpointCard from "@/components/EndpointCard";
-
-
-
 import IntegrationSuggestions from "@/components/IntegrationSuggestions";
 
 export default function Home() {
@@ -20,6 +17,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [project, setProject] = useState<Project | null>(null);
   const [endpoints, setEndpoints] = useState<EndpointsResponse | null>(null);
+  const [editedEndpoints, setEditedEndpoints] = useState<Endpoint[]>([]);
+  const [isEditing, setIsEditing] = useState(false);
   const [language, setLanguage] = useState<"python" | "typescript">("python");
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
@@ -34,7 +33,6 @@ export default function Home() {
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [fromCache, setFromCache] = useState(false);
   const [forceRefresh, setForceRefresh] = useState(false);
-
 
   const stopPolling = () => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -64,6 +62,7 @@ export default function Home() {
           stopPolling();
           const eps = await getEndpoints(projectId);
           setEndpoints(eps);
+          setEditedEndpoints(eps.endpoints);
           const sugg = await getSuggestions(projectId);
           setSuggestions(sugg.suggestions || []);
           loadHistory();
@@ -79,7 +78,7 @@ export default function Home() {
     try {
       const projects = await listProjects();
       setHistory(projects);
-    } catch {}
+    } catch { }
   };
 
   useEffect(() => {
@@ -99,6 +98,8 @@ export default function Home() {
     setError("");
     setProject(null);
     setEndpoints(null);
+    setEditedEndpoints([]);
+    setIsEditing(false);
     setFromCache(false);
     setSuggestions([]);
     setLogs([]);
@@ -108,16 +109,16 @@ export default function Home() {
       const p = await createProject(name, url, useCase, forceRefresh);
       setProject(p);
       if (p.status === "COMPLETED") {
-          // Cache hit — no need to poll
-          setFromCache(true);
-          const eps = await getEndpoints(p.id);
-          setEndpoints(eps);
-          const sugg = await getSuggestions(p.id);
-          setSuggestions(sugg.suggestions || []);
+        setFromCache(true);
+        const eps = await getEndpoints(p.id);
+        setEndpoints(eps);
+        setEditedEndpoints(eps.endpoints);
+        const sugg = await getSuggestions(p.id);
+        setSuggestions(sugg.suggestions || []);
       } else {
-          setFromCache(false);
-          startPolling(p.id);
-          startLogs(p.id);
+        setFromCache(false);
+        startPolling(p.id);
+        startLogs(p.id);
       }
     } catch (err: any) {
       if (err.response?.status === 429) {
@@ -130,11 +131,19 @@ export default function Home() {
     }
   };
 
+  const handleUpdateEndpoint = (updated: Endpoint) => {
+    setEditedEndpoints(prev => prev.map(ep => ep.id === updated.id ? updated : ep));
+  };
+
+  const handleDeleteEndpoint = (id: string) => {
+    setEditedEndpoints(prev => prev.filter(ep => ep.id !== id));
+  };
+
   const handleDownload = async () => {
     if (!project) return;
     setGenerating(true);
     try {
-      const blob = await generateSDK(project.id, language);
+      const blob = await generateSDK(project.id, language, editedEndpoints);
       const downloadUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = downloadUrl;
@@ -161,14 +170,16 @@ export default function Home() {
   const handleHistoryClick = async (p: Project) => {
     setProject(p);
     setShowHistory(false);
+    setIsEditing(false);
     if (p.status === "COMPLETED") {
       const eps = await getEndpoints(p.id);
       setEndpoints(eps);
+      setEditedEndpoints(eps.endpoints);
     }
   };
 
   const isProcessing = project && !["COMPLETED", "FAILED"].includes(project.status);
-
+  const displayedEndpoints = editedEndpoints;
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
       {/* Header */}
@@ -199,17 +210,17 @@ export default function Home() {
             ) : (
               <div className="space-y-2">
                 {history.map(p => (
-                  <div
+                  <button
                     key={p.id}
                     onClick={() => handleHistoryClick(p)}
-                    className="flex items-center justify-between p-3 rounded-lg bg-white/5 hover:bg-white/10 cursor-pointer transition"
+                    className="w-full text-left flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5 transition"
                   >
                     <div>
-                      <p className="text-sm font-medium">{p.api_name || p.name}</p>
+                      <p className="text-sm font-medium text-white">{p.api_name || p.name}</p>
                       <p className="text-xs text-slate-500 font-mono">{p.base_url}</p>
                     </div>
                     <StatusBadge status={p.status} />
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -316,12 +327,14 @@ export default function Home() {
                   <h3 className="text-lg font-semibold">{project.api_name || project.name}</h3>
                   <p className="text-sm text-slate-500 font-mono mt-1">{project.base_url}</p>
                 </div>
-                <StatusBadge status={project.status} />
-                {fromCache && (
+                <div className="flex items-center gap-3">
+                  <StatusBadge status={project.status} />
+                  {fromCache && (
                     <span className="flex items-center gap-1.5 text-xs bg-green-500/10 text-green-400 border border-green-500/20 px-2.5 py-1 rounded-full">
-                        ⚡ Served from cache
+                      ⚡ Served from cache
                     </span>
-                )}
+                  )}
+                </div>
               </div>
               {isProcessing && (
                 <div className="mt-4 h-1 bg-white/10 rounded-full overflow-hidden">
@@ -346,12 +359,49 @@ export default function Home() {
               <IntegrationSuggestions suggestions={suggestions} />
             )}
 
-            {endpoints && endpoints.endpoints.length > 0 && (
+            {endpoints && displayedEndpoints.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold text-slate-200">
-                    {endpoints.endpoint_count} Endpoints Discovered
-                  </h3>
+                  <div className="flex items-center gap-3">
+                    <h3 className="font-semibold text-slate-200">
+                      {displayedEndpoints.length} Endpoint{displayedEndpoints.length !== 1 ? "s" : ""}
+                      {isEditing && endpoints.endpoints.length !== displayedEndpoints.length && (
+                        <span className="text-slate-500 text-sm ml-1">
+                          (of {endpoints.endpoints.length})
+                        </span>
+                      )}
+                    </h3>
+                    {/* Edit toggle */}
+                    {!isEditing ? (
+                      <button
+                        onClick={() => setIsEditing(true)}
+                        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white border border-white/10 hover:border-white/20 px-2.5 py-1 rounded-lg transition"
+                      >
+                        <Pencil className="w-3 h-3" />
+                        Edit
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setIsEditing(false)}
+                          className="flex items-center gap-1.5 text-xs text-green-400 hover:text-green-300 border border-green-500/30 hover:border-green-500/50 px-2.5 py-1 rounded-lg transition"
+                        >
+                          <Check className="w-3 h-3" />
+                          Done
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditedEndpoints(endpoints.endpoints);
+                            setIsEditing(false);
+                          }}
+                          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white border border-white/10 px-2.5 py-1 rounded-lg transition"
+                        >
+                          <X className="w-3 h-3" />
+                          Reset
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2">
                     {/* OpenAPI Export */}
                     <button
@@ -388,12 +438,15 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="space-y-3">
-                  {endpoints.endpoints.map(ep => (
+                  {displayedEndpoints.map(ep => (
                     <EndpointCard
                       key={ep.id}
                       endpoint={ep}
                       baseUrl={project.base_url}
-                      authScheme={project.auth_scheme}   // add this line
+                      auth={project.auth_scheme}
+                      isEditing={isEditing}
+                      onUpdate={handleUpdateEndpoint}
+                      onDelete={handleDeleteEndpoint}
                     />
                   ))}
                 </div>

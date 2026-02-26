@@ -58,10 +58,16 @@ export const getEndpoints = async (id: string): Promise<EndpointsResponse> => {
   return data;
 };
 
-export const generateSDK = async (id: string, language: string): Promise<Blob> => {
+export const generateSDK = async (
+  id: string,
+  language: string,
+  endpoints?: Endpoint[]
+): Promise<Blob> => {
+  const payload: any = { language };
+  if (endpoints) payload.endpoints = endpoints;
   const response = await api.post(
     `/api/v1/projects/${id}/generate`,
-    { language },
+    payload,
     { responseType: "blob" }
   );
   return response.data;

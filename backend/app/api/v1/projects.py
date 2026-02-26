@@ -200,7 +200,6 @@ async def get_endpoints(project_id: str, db: AsyncSession = Depends(get_db)):
         ],
     }
 
-
 @router.post("/{project_id}/generate")
 async def generate_code(
     project_id: str,
@@ -243,6 +242,22 @@ async def generate_code(
         ],
     }
 
+    # Allow client to override endpoints (for edit-before-generate)
+    if "endpoints" in payload and payload["endpoints"]:
+        schema["endpoints"] = [
+            {
+                "method": ep["method"],
+                "path": ep["path"],
+                "summary": ep.get("summary", ""),
+                "description": ep.get("description", ""),
+                "parameters": ep.get("parameters", []),
+                "request_body": ep.get("request_body", {}),
+                "response_schema": ep.get("response_schema", {}),
+                "tags": ep.get("tags", []),
+            }
+            for ep in payload["endpoints"]
+        ]
+
     zip_bytes = generate_sdk(schema, language)
     filename = f"{project.api_name or 'sdk'}_{language}_sdk.zip".replace(" ", "_").lower()
 
@@ -251,7 +266,6 @@ async def generate_code(
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
-
 
 @router.get("/{project_id}/export")
 async def export_openapi(
