@@ -64,7 +64,7 @@ export interface SuggestionsResponse {
 export const createProject = async (
   name: string, url: string, use_case: string = "", force_refresh: boolean = false
 ): Promise<Project> => {
-  const { data } = await api.post("/api/v1/projects", { name, url, use_case, force_refresh });
+  const { data } = await api.post("/api/v1/projects/", { name, url, use_case, force_refresh });
   return data;
 };
 
@@ -110,7 +110,7 @@ export const getRateLimitStatus = async (): Promise<RateLimitStatus> => {
 };
 
 export const listProjects = async (): Promise<Project[]> => {
-  const { data } = await api.get("/api/v1/projects");
+  const { data } = await api.get("/api/v1/projects/");
   return data;
 };
 
