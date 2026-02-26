@@ -14,8 +14,8 @@ export default function IntegrationSuggestions({ suggestions }: { suggestions: S
 
   return (
     <div className="space-y-3">
-      <h3 className="font-semibold text-slate-200 flex items-center gap-2">
-        <Code2 className="w-4 h-4 text-blue-400" />
+      <h3 className="flex items-center gap-2 font-semibold text-[var(--foreground)]">
+        <Code2 className="h-4 w-4 text-[var(--primary)]" />
         Integration Path Suggestions
       </h3>
       {suggestions.map((s, i) => (
@@ -23,36 +23,36 @@ export default function IntegrationSuggestions({ suggestions }: { suggestions: S
           key={i}
           className={`border rounded-xl p-4 ${
             s.is_recommended
-              ? "border-blue-500/50 bg-blue-500/10"
-              : "border-white/10 bg-white/5"
+              ? "border-[var(--primary)]/40 bg-[var(--primary)]/10"
+              : "border-[var(--border)] bg-[var(--card)]"
           }`}
         >
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <span className="font-semibold text-sm">{s.approach}</span>
-              <span className="text-xs bg-white/10 px-2 py-0.5 rounded text-slate-400">
+              <span className="rounded bg-[var(--card-2)] px-2 py-0.5 text-xs text-[var(--muted)]">
                 {s.language}
               </span>
             </div>
             {s.is_recommended && (
-              <span className="flex items-center gap-1 text-xs text-blue-400 font-semibold">
+              <span className="flex items-center gap-1 text-xs font-semibold text-[var(--primary)]">
                 <CheckCircle className="w-3.5 h-3.5" />
                 Recommended
               </span>
             )}
           </div>
-          <p className="text-sm text-slate-400 mb-3">{s.reasoning}</p>
+          <p className="mb-3 text-sm text-[var(--muted)]">{s.reasoning}</p>
           {s.recommended_libraries?.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-3">
               {s.recommended_libraries.map(lib => (
-                <span key={lib} className="text-xs bg-white/10 px-2 py-0.5 rounded font-mono text-slate-300">
+                <span key={lib} className="rounded bg-[var(--card-2)] px-2 py-0.5 font-mono text-xs text-[var(--foreground)]">
                   {lib}
                 </span>
               ))}
             </div>
           )}
           {s.code_snippet && (
-            <pre className="text-xs bg-black/40 text-green-400 p-3 rounded-lg font-mono overflow-auto">
+            <pre className="overflow-auto rounded-lg bg-[var(--coffee-bean)] p-3 font-mono text-xs text-[var(--lavender-blush)]">
               {s.code_snippet}
             </pre>
           )}

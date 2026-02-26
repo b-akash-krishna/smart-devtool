@@ -2,27 +2,41 @@
 
 import { useState, useEffect } from "react";
 import { X, Download, Copy, Check } from "lucide-react";
-import { previewSDK } from "@/lib/api";
+import { Endpoint, previewSDK } from "@/lib/api";
 
 interface Props {
   projectId: string;
   language: "python" | "typescript";
   apiName: string;
+  endpoints: Endpoint[];
   onClose: () => void;
   onDownload: () => void;
 }
 
-export default function SDKPreviewModal({ projectId, language, apiName, onClose, onDownload }: Props) {
+export default function SDKPreviewModal({
+  projectId,
+  language,
+  apiName,
+  endpoints,
+  onClose,
+  onDownload,
+}: Props) {
   const [code, setCode] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    previewSDK(projectId, language)
-      .then(setCode)
-      .catch(() => setCode("// Failed to load preview"))
-      .finally(() => setLoading(false));
-  }, [projectId, language]);
+    let cancelled = false;
+    previewSDK(projectId, language, endpoints)
+      .then((previewCode) => {
+        if (!cancelled) setCode(previewCode);
+      })
+      .catch(() => {
+        if (!cancelled) setCode("// Failed to load preview");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, language, endpoints]);
 
   const handleCopy = async () => {
     if (!code) return;
@@ -32,49 +46,51 @@ export default function SDKPreviewModal({ projectId, language, apiName, onClose,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-      <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--coffee-bean)]/55 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4 md:px-6">
           <div>
-            <h2 className="font-semibold text-white">SDK Preview</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {apiName} · {language === "python" ? "Python" : "TypeScript"}
+            <h2 className="text-lg font-semibold text-[var(--foreground)]">SDK Preview</h2>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">
+              {apiName} | {language === "python" ? "Python" : "TypeScript"}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               onClick={handleCopy}
               disabled={!code}
-              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white border border-white/10 hover:border-white/20 px-3 py-1.5 rounded-lg transition"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card-2)] px-3 py-1.5 text-xs text-[var(--muted)] transition hover:text-[var(--foreground)]"
             >
-              {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-              {copied ? "Copied!" : "Copy"}
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-[var(--success)]" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+              {copied ? "Copied" : "Copy"}
             </button>
             <button
               onClick={onDownload}
-              className="flex items-center gap-1.5 text-xs bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded-lg transition font-medium"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--success)] px-3 py-1.5 text-xs font-medium text-[var(--lavender-blush)] transition hover:brightness-110"
             >
-              <Download className="w-3.5 h-3.5" />
+              <Download className="h-3.5 w-3.5" />
               Download ZIP
             </button>
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-white transition p-1.5 rounded-lg hover:bg-white/5"
+              className="rounded-lg p-1.5 text-[var(--muted)] transition hover:bg-[var(--card-2)] hover:text-[var(--foreground)]"
             >
-              <X className="w-4 h-4" />
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* Code */}
         <div className="flex-1 overflow-auto">
-          {loading ? (
-            <div className="flex items-center justify-center h-48 text-slate-500 text-sm">
+          {code === null ? (
+            <div className="flex h-48 items-center justify-center text-sm text-[var(--muted)]">
               Loading preview...
             </div>
           ) : (
-            <pre className="text-xs text-green-300 font-mono p-6 leading-relaxed whitespace-pre-wrap">
+            <pre className="p-5 font-mono text-xs leading-relaxed text-[var(--foreground)] md:p-6">
               {code}
             </pre>
           )}

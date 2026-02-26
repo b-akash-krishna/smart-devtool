@@ -32,28 +32,25 @@ export default function TryItPlayground({ endpoint, baseUrl, auth }: Props) {
     setLoading(true);
     setResponse(null);
     try {
-      // Build URL with path params substituted
       let path = endpoint.path;
-      endpoint.parameters?.forEach(p => {
+      endpoint.parameters?.forEach((p) => {
         if (p.location === "path" && paramValues[p.name]) {
           path = path.replace(`{${p.name}}`, paramValues[p.name]);
         }
       });
 
       const url = new URL(`${baseUrl}${path}`);
-      endpoint.parameters?.forEach(p => {
+      endpoint.parameters?.forEach((p) => {
         if (p.location === "query" && paramValues[p.name]) {
           url.searchParams.set(p.name, paramValues[p.name]);
         }
       });
 
-      // Build headers
       const headers: Record<string, string> = { Accept: "application/json" };
       if (authToken) {
         if (isApiKey) {
           headers[headerName] = authToken;
         } else {
-          // Bearer token — prepend "Bearer " if not already present
           headers[headerName] = authToken.startsWith("Bearer ")
             ? authToken
             : `Bearer ${authToken}`;
@@ -73,8 +70,9 @@ export default function TryItPlayground({ endpoint, baseUrl, auth }: Props) {
         const text = await res.text();
         setResponse(text || "(empty response)");
       }
-    } catch (e: any) {
-      setResponse(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Unknown error";
+      setResponse(`Error: ${message}`);
       setStatus(null);
     } finally {
       setLoading(false);
@@ -82,89 +80,96 @@ export default function TryItPlayground({ endpoint, baseUrl, auth }: Props) {
   };
 
   return (
-    <div className="mt-3 border-t border-gray-100 pt-3">
+    <div className="mt-3 border-t border-[var(--border)] pt-3">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 font-medium transition"
+        className="flex items-center gap-1.5 text-xs font-medium text-[var(--primary)] transition hover:brightness-110"
       >
-        <Play className="w-3 h-3" />
+        <Play className="h-3 w-3" />
         Try It
-        {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
       </button>
 
       {open && (
         <div className="mt-3 space-y-3">
-
-          {/* Auth token input */}
           {authRequired && (
-            <div className="flex items-center gap-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <Lock className="w-3.5 h-3.5 text-yellow-600 shrink-0" />
-              <label className="text-xs font-mono text-yellow-700 w-24 shrink-0">
+            <div className="flex items-center gap-3 rounded-lg border border-[var(--cherry-rose)]/30 bg-[var(--cherry-rose)]/10 p-2.5">
+              <Lock className="h-3.5 w-3.5 shrink-0 text-[var(--cherry-rose)]" />
+              <label className="w-24 shrink-0 font-mono text-xs text-[var(--foreground)]">
                 {isApiKey ? "API Key" : "Bearer Token"}
               </label>
               <input
                 type="password"
-                placeholder={isApiKey ? "your-api-key" : "your-token (without 'Bearer ')"}
+                placeholder={isApiKey ? "your-api-key" : "your-token"}
                 value={authToken}
-                onChange={e => setAuthToken(e.target.value)}
-                className="flex-1 text-xs border border-yellow-300 bg-white rounded px-2 py-1.5 font-mono focus:outline-none focus:border-yellow-500"
+                onChange={(e) => setAuthToken(e.target.value)}
+                className="flex-1 rounded border border-[var(--cherry-rose)]/30 bg-[var(--card-2)] px-2 py-1.5 font-mono text-xs text-[var(--foreground)] focus:border-[var(--cherry-rose)] focus:outline-none"
               />
             </div>
           )}
 
-          {/* Query parameters */}
-          {endpoint.parameters?.filter(p => p.location === "query").map(param => (
-            <div key={param.name} className="flex items-center gap-3">
-              <label className="text-xs font-mono text-gray-500 w-28 shrink-0">
-                {param.name}
-                {param.required && <span className="text-red-400 ml-0.5">*</span>}
-              </label>
-              <input
-                type="text"
-                placeholder={param.type}
-                value={paramValues[param.name] || ""}
-                onChange={e => setParamValues(prev => ({ ...prev, [param.name]: e.target.value }))}
-                className="flex-1 text-xs border border-gray-200 rounded px-2 py-1.5 font-mono focus:outline-none focus:border-blue-400"
-              />
-            </div>
-          ))}
+          {endpoint.parameters
+            ?.filter((p) => p.location === "query")
+            .map((param) => (
+              <div key={param.name} className="flex items-center gap-3">
+                <label className="w-28 shrink-0 font-mono text-xs text-[var(--muted)]">
+                  {param.name}
+                  {param.required && <span className="ml-0.5 text-[var(--cherry-rose)]">*</span>}
+                </label>
+                <input
+                  type="text"
+                  placeholder={param.type}
+                  value={paramValues[param.name] || ""}
+                  onChange={(e) =>
+                    setParamValues((prev) => ({ ...prev, [param.name]: e.target.value }))
+                  }
+                  className="flex-1 rounded border border-[var(--border)] bg-[var(--card-2)] px-2 py-1.5 font-mono text-xs text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
+                />
+              </div>
+            ))}
 
-          {/* Path parameters */}
-          {endpoint.parameters?.filter(p => p.location === "path").map(param => (
-            <div key={param.name} className="flex items-center gap-3">
-              <label className="text-xs font-mono text-gray-500 w-28 shrink-0">
-                {param.name}
-                <span className="text-red-400 ml-0.5">*</span>
-                <span className="text-gray-400 ml-1">(path)</span>
-              </label>
-              <input
-                type="text"
-                placeholder={`Enter ${param.name}`}
-                value={paramValues[param.name] || ""}
-                onChange={e => setParamValues(prev => ({ ...prev, [param.name]: e.target.value }))}
-                className="flex-1 text-xs border border-gray-200 rounded px-2 py-1.5 font-mono focus:outline-none focus:border-blue-400"
-              />
-            </div>
-          ))}
+          {endpoint.parameters
+            ?.filter((p) => p.location === "path")
+            .map((param) => (
+              <div key={param.name} className="flex items-center gap-3">
+                <label className="w-28 shrink-0 font-mono text-xs text-[var(--muted)]">
+                  {param.name}
+                  <span className="ml-0.5 text-[var(--cherry-rose)]">*</span>
+                  <span className="ml-1 text-[var(--muted)]/70">(path)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder={`Enter ${param.name}`}
+                  value={paramValues[param.name] || ""}
+                  onChange={(e) =>
+                    setParamValues((prev) => ({ ...prev, [param.name]: e.target.value }))
+                  }
+                  className="flex-1 rounded border border-[var(--border)] bg-[var(--card-2)] px-2 py-1.5 font-mono text-xs text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
+                />
+              </div>
+            ))}
 
           <button
             onClick={handleRun}
             disabled={loading}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded transition"
+            className="inline-flex items-center gap-1.5 rounded bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--lavender-blush)] transition hover:brightness-110 disabled:opacity-50"
           >
-            <Play className="w-3 h-3" />
+            <Play className="h-3 w-3" />
             {loading ? "Running..." : `Run ${endpoint.method}`}
           </button>
 
-          {/* Response */}
           {response && (
-            <div className="rounded-lg overflow-hidden border border-gray-200">
-              <div className={`px-3 py-1.5 text-xs font-semibold flex items-center gap-2 ${
-                status && status < 300 ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
-              }`}>
+            <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+              <div
+                className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold ${
+                  status && status < 300
+                    ? "bg-[var(--success)]/12 text-[var(--success)]"
+                    : "bg-[var(--cherry-rose)]/12 text-[var(--cherry-rose)]"
+                }`}
+              >
                 {status && <span>HTTP {status}</span>}
               </div>
-              <pre className="text-xs bg-gray-950 text-green-400 p-3 overflow-auto max-h-48 font-mono">
+              <pre className="max-h-48 overflow-auto bg-[var(--coffee-bean)] p-3 font-mono text-xs text-[var(--lavender-blush)]">
                 {response}
               </pre>
             </div>

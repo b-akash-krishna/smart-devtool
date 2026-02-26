@@ -276,13 +276,12 @@ async def get_endpoints(project_id: str, db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.get("/{project_id}/preview")
-async def preview_sdk(
+async def _preview_sdk_code(
     project_id: str,
-    language: str = "python",
+    language: str,
+    endpoint_override: list | None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Returns the generated SDK as plain text for in-browser preview."""
     if language not in ["python", "typescript"]:
         raise HTTPException(status_code=400, detail="Language must be 'python' or 'typescript'")
 
@@ -297,7 +296,7 @@ async def preview_sdk(
         select(APIEndpoint).where(APIEndpoint.project_id == project_id)
     )
     endpoints = ep_result.scalars().all()
-    schema = _build_schema(project, endpoints)
+    schema = _build_schema(project, endpoints, endpoint_override)
 
     # Generate zip and extract the main client file
     import zipfile
@@ -313,6 +312,30 @@ async def preview_sdk(
             raise HTTPException(status_code=500, detail="Could not extract preview")
         code = zf.read(client_file).decode("utf-8")
 
+    return code
+
+
+@router.get("/{project_id}/preview")
+async def preview_sdk_get(
+    project_id: str,
+    language: str = "python",
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns the generated SDK as plain text for in-browser preview."""
+    code = await _preview_sdk_code(project_id, language, None, db)
+    return Response(content=code, media_type="text/plain")
+
+
+@router.post("/{project_id}/preview")
+async def preview_sdk_post(
+    project_id: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns preview code, optionally using edited endpoint overrides."""
+    language = payload.get("language", "python")
+    endpoint_override = payload.get("endpoints") or None
+    code = await _preview_sdk_code(project_id, language, endpoint_override, db)
     return Response(content=code, media_type="text/plain")
 
 

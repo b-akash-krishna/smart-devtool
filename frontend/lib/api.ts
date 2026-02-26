@@ -48,6 +48,19 @@ export interface RateLimitStatus {
   reset_in_seconds: number;
 }
 
+export interface Suggestion {
+  approach: string;
+  language: string;
+  reasoning: string;
+  recommended_libraries: string[];
+  code_snippet: string;
+  is_recommended: boolean;
+}
+
+export interface SuggestionsResponse {
+  suggestions: Suggestion[];
+}
+
 export const createProject = async (
   name: string, url: string, use_case: string = "", force_refresh: boolean = false
 ): Promise<Project> => {
@@ -70,7 +83,7 @@ export const generateSDK = async (
   language: string,
   endpoints?: Endpoint[]
 ): Promise<Blob> => {
-  const payload: any = { language };
+  const payload: { language: string; endpoints?: Endpoint[] } = { language };
   if (endpoints) payload.endpoints = endpoints;
   const response = await api.post(
     `/api/v1/projects/${id}/generate`,
@@ -80,8 +93,14 @@ export const generateSDK = async (
   return response.data;
 };
 
-export const previewSDK = async (id: string, language: string): Promise<string> => {
-  const { data } = await api.get(`/api/v1/projects/${id}/preview?language=${language}`);
+export const previewSDK = async (
+  id: string,
+  language: string,
+  endpoints?: Endpoint[]
+): Promise<string> => {
+  const payload: { language: string; endpoints?: Endpoint[] } = { language };
+  if (endpoints) payload.endpoints = endpoints;
+  const { data } = await api.post(`/api/v1/projects/${id}/preview`, payload);
   return data;
 };
 
@@ -102,7 +121,7 @@ export const exportOpenAPI = async (id: string, format: "json" | "yaml"): Promis
   return response.data;
 };
 
-export const getSuggestions = async (id: string): Promise<any> => {
+export const getSuggestions = async (id: string): Promise<SuggestionsResponse> => {
   const { data } = await api.get(`/api/v1/projects/${id}/suggestions`);
   return data;
 };

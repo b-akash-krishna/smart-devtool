@@ -1,8 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --coffee-bean: #211103;
+  --rich-mahogany: #3d1308;
+  --burgundy: #7b0d1e;
+  --cherry-rose: #9f2042;
+  --lavender-blush: #f8e5ee;
+
+  --background: var(--lavender-blush);
+  --foreground: var(--coffee-bean);
+  --card: #fff4f8;
+  --card-2: #f4d8e3;
+  --border: #d6b6c3;
+  --muted: #6f3b4d;
+  --primary: var(--cherry-rose);
+  --accent: var(--burgundy);
+  --success: var(--rich-mahogany);
 }
 
 @theme inline {
@@ -14,13 +27,40 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: var(--lavender-blush);
+    --foreground: var(--coffee-bean);
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), "Segoe UI", sans-serif;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    radial-gradient(1200px circle at 8% -10%, rgba(159, 32, 66, 0.2), transparent 55%),
+    radial-gradient(900px circle at 95% 10%, rgba(123, 13, 30, 0.18), transparent 52%),
+    linear-gradient(180deg, #f8e5ee 0%, #f2dbe5 100%);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-rise {
+  animation: rise 0.32s ease-out;
 }
