@@ -190,7 +190,7 @@ async def create_project(
     request: Request = None,
 ):
     ip = request.client.host if request else "unknown"
-    allowed, retry_after = await check_rate_limit(ip, limit=10, window_seconds=3600)
+    allowed, retry_after = await check_rate_limit(ip, limit=20, window_seconds=3600)
     if not allowed:
         raise HTTPException(
             status_code=429,
