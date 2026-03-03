@@ -24,6 +24,8 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
+    from app.models.project import Project, APIEndpoint
+    
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
