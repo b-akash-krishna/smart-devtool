@@ -139,7 +139,7 @@ async def rate_limit_status(request: Request):
     import redis.asyncio as aioredis
     from app.core.config import settings
 
-    ip = request.client.host if request.client else "unknown"
+    ip = request.client.host if request and request.client else "unknown"
     limit = 10
     window_seconds = 3600
 
@@ -189,7 +189,7 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
     request: Request = None,
 ):
-    ip = request.client.host if request else "unknown"
+    ip = request.client.host if request and request.client else "unknown"
     allowed, retry_after = await check_rate_limit(ip, limit=20, window_seconds=3600)
     if not allowed:
         raise HTTPException(
