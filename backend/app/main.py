@@ -26,6 +26,13 @@ async def startup():
         await conn.run_sync(Base.metadata.create_all)
 
 
+@app.get("/")
+async def root():
+    return {
+        "message": f"Welcome to {settings.app_name} API!",
+        "version": settings.app_version,
+    }
+
 @app.get("/health")
 async def health_check():
     return {
