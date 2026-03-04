@@ -25,9 +25,17 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     from app.models.project import Project, APIEndpoint
+    from sqlalchemy import text
     
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Add new columns if the table was created before these fields were added.
+        try:
+            await conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS use_case TEXT"))
+            await conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS integration_suggestions JSONB"))
+        except Exception as e:
+            print("Migration skip:", e)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
