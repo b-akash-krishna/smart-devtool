@@ -110,14 +110,14 @@ export default function Home() {
     try {
       const projects = await listProjects();
       setHistory(projects);
-    } catch {}
+    } catch { }
   };
 
   const fetchRateLimit = async () => {
     try {
       const status = await getRateLimitStatus();
       setRateLimit(status);
-    } catch {}
+    } catch { }
   };
 
   useEffect(() => {
@@ -232,10 +232,10 @@ export default function Home() {
     !rateLimit
       ? "text-[var(--muted)]"
       : rateLimit.remaining <= 2
-      ? "text-[var(--burgundy)]"
-      : rateLimit.remaining <= 5
-      ? "text-[var(--cherry-rose)]"
-      : "text-[var(--rich-mahogany)]";
+        ? "text-[var(--burgundy)]"
+        : rateLimit.remaining <= 5
+          ? "text-[var(--cherry-rose)]"
+          : "text-[var(--rich-mahogany)]";
   const resetMinutes = rateLimit ? Math.ceil(rateLimit.reset_in_seconds / 60) : 0;
 
   return (
@@ -255,13 +255,13 @@ export default function Home() {
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             {/* <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--primary)]/40 bg-[var(--primary)]/20 text-[var(--primary)]"> */}
-              <Image
-                src="/icon.png"
-                alt="Smart DevTool logo"
-                width={20}
-                height={20}
-                className="h-5 w-5 object-contain"
-              />
+            <Image
+              src="/window.svg"
+              alt="Smart DevTool logo"
+              width={20}
+              height={20}
+              className="h-5 w-5 object-contain"
+            />
             {/* </div> */}
             <div>
               <h1 className="text-lg font-semibold tracking-tight md:text-xl">Smart DevTool</h1>
@@ -400,12 +400,12 @@ export default function Home() {
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-6 py-2.5 text-sm font-semibold text-[var(--lavender-blush)] shadow-[0_8px_20px_rgba(159,32,66,0.35)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Image
-                src="/icon.png"
-                alt="Smart DevTool logo"
-                width={20}
-                height={20}
-                className="h-5 w-5 object-contain"
-              />
+                  src="/window.svg"
+                  alt="Smart DevTool logo"
+                  width={20}
+                  height={20}
+                  className="h-5 w-5 object-contain"
+                />
                 {loading ? "Starting..." : "Generate SDK"}
               </button>
             </div>
