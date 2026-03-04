@@ -256,7 +256,7 @@ export default function Home() {
           <div className="flex items-center gap-3">
             {/* <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--primary)]/40 bg-[var(--primary)]/20 text-[var(--primary)]"> */}
             <Image
-              src="/window.svg"
+              src="/favicon.ico"
               alt="Smart DevTool logo"
               width={20}
               height={20}
